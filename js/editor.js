@@ -28,7 +28,8 @@ import {
   newFractionCell,
   newPowCell,
   newSqrtCell,
-  newNRootCell
+  newNRootCell,
+  newAbsCell
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
 import {
@@ -46,12 +47,13 @@ import { renderKeypad, keyboardEventToCode } from './input/keypad.js';
 import { renderHebrewKeypad } from './input/hebrew-keypad.js';
 import { uploadWorksheet } from './io/import.js';
 import { attachPencilSurface } from './input/pencil.js';
+import { confirmDialog, promptDialog } from './ui/dialog.js';
 
 const CHAR_KEYS = new Set([
   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
   '+', '−', '×', '÷', '=', '.', '(', ')', '%',
   'x', 'y', 'a', 'b',
-  '<', '>'
+  '<', '>', '≤', '≥'
 ]);
 
 // Inside a fraction slot we can't open a nested composite (slots are plain
@@ -73,7 +75,8 @@ const COMPOSITE_KEYS = {
   // exp is already filled (see special-case in insertComposite).
   SQUARE: () => newPowCell('', '2'),
   SQRT: () => newSqrtCell(),
-  NROOT: () => newNRootCell()
+  NROOT: () => newNRootCell(),
+  ABS: () => newAbsCell()
 };
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -132,26 +135,26 @@ export async function mountEditor(root, notebookId) {
   root.innerHTML = `
     <div class="editor editor--full">
       <div class="editor__topbar">
-        <button class="editor__back" id="back-home">→ חזרה</button>
+        <button class="editor__back" id="back-home" aria-label="חזרה">← <span class="label">חזרה</span></button>
         <h2 class="editor__title" id="title"></h2>
-        <button class="btn btn--ghost" id="rename">שנה שם</button>
+        <button class="btn btn--ghost" id="rename"><span class="label">שנה שם</span></button>
       </div>
       <div class="editor__actions">
-        <button class="btn btn--ghost" id="upload-photo">📷 צלם דף</button>
-        <button class="btn btn--ghost" id="upload-library">🖼️ בחר תמונה</button>
-        <button class="btn btn--ghost" id="add-work">➕ אזור פתרון</button>
-        <button class="btn btn--ghost" id="toggle-split">🔀 פיצול</button>
-        <button class="btn btn--ghost" id="print-page">🖨️ הדפסה</button>
+        <button class="btn btn--ghost" id="upload-photo" aria-label="צלם דף">📷 <span class="label">צלם דף</span></button>
+        <button class="btn btn--ghost" id="upload-library" aria-label="בחר תמונה">🖼️ <span class="label">בחר תמונה</span></button>
+        <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
+        <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
+        <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
         <span class="editor__sep"></span>
-        <button class="btn btn--ghost" id="toggle-pen">✏️ ציור</button>
+        <button class="btn btn--ghost" id="toggle-pen" aria-label="ציור">✏️ <span class="label">ציור</span></button>
         <span class="pen-tools" id="pen-tools" hidden>
           ${PEN_COLORS.map(
             (c, i) => `<button class="pen-color ${i === 0 ? 'pen-color--active' : ''}"
               style="background:${c}" data-color="${c}" aria-label="צבע"></button>`
           ).join('')}
-          <button class="btn btn--ghost" id="toggle-eraser">🧽 מחק</button>
-          <button class="btn btn--ghost" id="undo-stroke">↶ בטל</button>
-          <button class="btn btn--ghost" id="clear-strokes">🗑️ נקה ציורים</button>
+          <button class="btn btn--ghost" id="toggle-eraser" aria-label="מחק">🧽 <span class="label">מחק</span></button>
+          <button class="btn btn--ghost" id="undo-stroke" aria-label="בטל">↶ <span class="label">בטל</span></button>
+          <button class="btn btn--ghost" id="clear-strokes" aria-label="נקה ציורים">🗑️ <span class="label">נקה ציורים</span></button>
         </span>
       </div>
       <div class="editor__page" id="page-scroll">
@@ -161,7 +164,10 @@ export async function mountEditor(root, notebookId) {
           <canvas class="pencil-canvas" id="pencil-canvas"></canvas>
         </div>
       </div>
-      <div class="editor__keypad-host" id="keypad-host"></div>
+      <div class="editor__keypad-host" id="keypad-host">
+        <span class="keypad-mode-badge" id="keypad-mode-badge" aria-live="polite">מצב: מתמטיקה</span>
+        <div id="keypad-host-inner"></div>
+      </div>
     </div>
   `;
 
@@ -179,8 +185,13 @@ export async function mountEditor(root, notebookId) {
     window.location.hash = '';
   });
   document.getElementById('rename').addEventListener('click', async () => {
-    const name = window.prompt('שם חדש למחברת:', nb.name);
-    if (!name || !name.trim() || name.trim() === nb.name) return;
+    const name = await promptDialog({
+      title: 'שינוי שם',
+      body: 'שם חדש למחברת:',
+      defaultValue: nb.name,
+      confirmLabel: 'שמירה'
+    });
+    if (name == null || !name.trim() || name.trim() === nb.name) return;
     await renameNotebook(notebookId, name.trim());
     document.getElementById('title').textContent = name.trim();
     nb.name = name.trim();
@@ -282,14 +293,19 @@ export async function mountEditor(root, notebookId) {
 
   await renderBlocks();
 
-  const keypadHost = document.getElementById('keypad-host');
+  const keypadHost = document.getElementById('keypad-host-inner');
+  const keypadModeBadge = document.getElementById('keypad-mode-badge');
 
   function mountKeypad() {
     keypadHost.innerHTML = '';
     if (keypadMode === 'hebrew') {
       keypadHost.appendChild(renderHebrewKeypad({ onKey: handleHebrewKey }));
+      keypadModeBadge.textContent = 'מצב: עברית';
+      keypadModeBadge.classList.add('keypad-mode-badge--hebrew');
     } else {
       keypadHost.appendChild(renderKeypad({ onKey: handleKey }));
+      keypadModeBadge.textContent = 'מצב: מתמטיקה';
+      keypadModeBadge.classList.remove('keypad-mode-badge--hebrew');
     }
   }
 
@@ -670,11 +686,15 @@ export async function mountEditor(root, notebookId) {
   async function removeBlock(blockId) {
     const block = page.blocks.find((b) => b.id === blockId);
     if (!block) return;
-    const confirmText =
-      block.type === BLOCK.WORK
-        ? 'להסיר את אזור הפתרון הזה?'
-        : 'להסיר את הדף הזה?';
-    if (!window.confirm(confirmText)) return;
+    const isWork = block.type === BLOCK.WORK;
+    const ok = await confirmDialog({
+      title: isWork ? 'הסרת אזור פתרון' : 'הסרת דף',
+      body: isWork ? 'להסיר את אזור הפתרון הזה?' : 'להסיר את הדף הזה?',
+      confirmLabel: 'הסרה',
+      cancelLabel: 'ביטול',
+      destructive: true
+    });
+    if (!ok) return;
 
     // Delete any strokes that belong to this block. Strokes anchored to the
     // block by id (the modern path) are removed directly. Legacy unanchored
@@ -945,7 +965,14 @@ export async function mountEditor(root, notebookId) {
 
   async function clearAllStrokes() {
     if (strokes.length === 0) return;
-    if (!window.confirm('למחוק את כל הציורים בדף הזה?')) return;
+    const ok = await confirmDialog({
+      title: 'מחיקת ציורים',
+      body: 'למחוק את כל הציורים בדף הזה?',
+      confirmLabel: 'מחקי הכל',
+      cancelLabel: 'ביטול',
+      destructive: true
+    });
+    if (!ok) return;
     // Snapshot the IDs we're committing to delete. Any new strokes that
     // arrive after this snapshot (e.g. a pointerup completing right now)
     // are intentionally preserved.
