@@ -1,0 +1,181 @@
+* { box-sizing: border-box; }
+
+:root {
+  --bg: #fafafa;
+  --fg: #1a1a1a;
+  --accent: #0b6cf2;
+  --accent-pressed: #0958c4;
+  --muted: #888;
+  --card: #fff;
+  --border: #e0e0e0;
+  --danger: #c0392b;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: -apple-system, "SF Hebrew", "Helvetica Neue", "Arial", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 18px;
+  -webkit-text-size-adjust: 100%;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#app {
+  min-height: 100%;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.screen {
+  padding: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 32px;
+  margin: 12px 0 24px;
+  font-weight: 700;
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  padding: 12px 20px;
+  border-radius: 12px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  font-family: inherit;
+}
+.btn:active { background: var(--accent-pressed); }
+.btn--ghost {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.btn--ghost:active { background: rgba(11, 108, 242, 0.08); }
+
+.notebook-list {
+  display: grid;
+  gap: 12px;
+}
+
+.notebook-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: transform 0.05s ease;
+}
+.notebook-card:active { transform: scale(0.99); }
+
+.notebook-card__main {
+  flex: 1;
+  min-width: 0;
+}
+.notebook-card__name {
+  font-weight: 600;
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+.notebook-card__meta {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.notebook-card__delete {
+  background: transparent;
+  border: none;
+  color: var(--danger);
+  font-size: 22px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.notebook-card__delete:active { background: rgba(192, 57, 43, 0.1); }
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  line-height: 1.6;
+}
+
+/* Notebook editor (P1 placeholder) */
+.editor {
+  padding: 16px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.editor__topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.editor__back {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.editor__back:active { background: rgba(11, 108, 242, 0.08); }
+.editor__title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor__page {
+  background: white;
+  min-height: 600px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+}
+.placeholder-text {
+  color: var(--muted);
+  text-align: center;
+  padding: 80px 20px;
+  line-height: 1.6;
+}
+
+/* iPadOS PWA standalone polish */
+@media (display-mode: standalone) {
+  body { background: var(--bg); }
+}
