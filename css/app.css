@@ -445,6 +445,14 @@ h1 {
   border-bottom-color: #b8b8b8;
 }
 
+/* Wide composites (multi-cell fractions) need their box to actually fill
+   the grid-column span. The default `width: var(--cell-size)` above pins
+   every cell to one column wide and the bar/digits then overflow into
+   neighboring cells. width:auto lets the grid track size win. */
+.cell--span {
+  width: auto;
+}
+
 .cell--cursor {
   background: rgba(11, 108, 242, 0.14);
   box-shadow: inset 0 0 0 2px var(--accent);
