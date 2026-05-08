@@ -6,39 +6,45 @@
 //
 // IMPORTANT: the wrapper renders dir="ltr" — the keys themselves contain
 // Hebrew letters which are RTL-marked Unicode, but the KEY ORDER is LTR so
-// it visually matches a physical Hebrew QWERTY. Setting the wrapper to
-// dir="rtl" would mirror the row order, which is exactly the bug we just
-// fixed.
+// it visually matches a physical Hebrew QWERTY.
 //
-// Hebrew typing in the grid flows RTL (cursor advances left after each
-// letter — see handleHebrewKey in editor.js). Arrow keys are exposed here
-// so the kid can fix a single Hebrew letter without backspacing through.
+// Layout (top to bottom):
+//   Row 1: 8 letters + ⌫
+//   Row 2: 10 letters
+//   Row 3: 9 letters
+//   Row 4: punctuation strip (! : . / ( ))
+//   Row 5: ABC/123 + רווח (wide) + ↑ ← ↓ →
+// The arrows live on the bottom action row alongside mode-toggle and
+// space; punctuation sits directly above them.
 
-import { buildSection, makeKey, modeKey } from './keypad.js';
+import { makeKey, modeKey } from './keypad.js';
 
-const ROWS = [
+const LETTER_ROWS = [
   ['ק', 'ר', 'א', 'ט', 'ו', 'ן', 'ם', 'פ'],
   ['ש', 'ד', 'ג', 'כ', 'ע', 'י', 'ח', 'ל', 'ך', 'ף'],
   ['ז', 'ס', 'ב', 'ה', 'נ', 'מ', 'צ', 'ת', 'ץ']
 ];
+
+const PUNCTUATION = ['!', ':', '.', '/', '(', ')'];
 
 export function renderHebrewKeypad({ onKey }) {
   const wrapper = document.createElement('div');
   wrapper.className = 'keypad keypad--hebrew';
   wrapper.setAttribute('dir', 'ltr');
 
-  // Letters are still flexed into rows — Hebrew QWERTY has variable widths
-  // per row, so flex matches a physical keyboard better than a grid.
+  // Letters and the punctuation/action rows sit in a column block so the
+  // bottom rows hug the same width as the letter rows above them.
   const lettersBlock = document.createElement('div');
   lettersBlock.className = 'keypad__letters';
-  ROWS.forEach((letters, rowIndex) => {
+
+  LETTER_ROWS.forEach((letters, rowIndex) => {
     const rowEl = document.createElement('div');
     rowEl.className = 'keypad__row';
     for (const ch of letters) {
       rowEl.appendChild(makeKey({ code: ch, label: ch, kind: 'letter' }, onKey));
     }
     // Backspace lives at the right end of the top row (matches the iPadOS
-    // Hebrew keyboard); the dedicated arrow-cluster below has no backspace.
+    // Hebrew keyboard).
     if (rowIndex === 0) {
       rowEl.appendChild(makeKey({
         code: 'BACKSPACE',
@@ -50,36 +56,27 @@ export function renderHebrewKeypad({ onKey }) {
     lettersBlock.appendChild(rowEl);
   });
 
-  // Bottom action row (LTR): mode-switch + wide space. Punctuation and
-  // newline keys were dropped — kids type free-text answers as one line.
+  // Punctuation row — sits above the bottom action row.
+  const punctRow = document.createElement('div');
+  punctRow.className = 'keypad__row keypad__row--punct';
+  for (const ch of PUNCTUATION) {
+    punctRow.appendChild(makeKey({ code: ch, label: ch, kind: 'op' }, onKey));
+  }
+  lettersBlock.appendChild(punctRow);
+
+  // Bottom action row: mode-switch, wide Space, then ↑ ← ↓ →. The arrows
+  // moved off the right-hand cluster onto this row so the kid has a
+  // single bottom strip to scan.
   const actionRow = document.createElement('div');
   actionRow.className = 'keypad__row keypad__row--bottom';
   actionRow.appendChild(makeKey(modeKey('מקלדת מתמטית'), onKey));
-  const space = makeKey({ code: 'SPACE', label: 'רווח', kind: 'space' }, onKey);
-  actionRow.appendChild(space);
+  actionRow.appendChild(makeKey({ code: 'SPACE', label: 'רווח', kind: 'space' }, onKey));
+  actionRow.appendChild(makeKey({ code: 'UP', label: '↑', kind: 'nav' }, onKey));
+  actionRow.appendChild(makeKey({ code: 'LEFT', label: '←', kind: 'nav' }, onKey));
+  actionRow.appendChild(makeKey({ code: 'DOWN', label: '↓', kind: 'nav' }, onKey));
+  actionRow.appendChild(makeKey({ code: 'RIGHT', label: '→', kind: 'nav' }, onKey));
   lettersBlock.appendChild(actionRow);
+
   wrapper.appendChild(lettersBlock);
-
-  // Arrow cluster: ↑ on top row alone (centered), ←↓→ below. Matches the
-  // image in the spec — without backspace, since that moved to the letter
-  // row's right end.
-  wrapper.appendChild(
-    buildSection(
-      {
-        name: 'arrows',
-        cols: 3,
-        keys: [
-          null,
-          { code: 'UP', label: '↑', kind: 'nav' },
-          null,
-          { code: 'LEFT', label: '←', kind: 'nav' },
-          { code: 'DOWN', label: '↓', kind: 'nav' },
-          { code: 'RIGHT', label: '→', kind: 'nav' }
-        ]
-      },
-      onKey
-    )
-  );
-
   return wrapper;
 }

@@ -9,11 +9,12 @@ import {
   isComposite,
   compositeSlots,
   compositeWidth,
+  findOccupyingAnchor,
   occupiedCellSet
 } from '../page-model.js';
 
 export function renderWorkBlock(block, options = {}) {
-  const { onCellTap, cursor, onDelete, onMoveRow } = options;
+  const { onCellTap, cursor, onDelete, onMovePart } = options;
 
   const wrapper = document.createElement('div');
   wrapper.className = 'workblock';
@@ -57,13 +58,13 @@ export function renderWorkBlock(block, options = {}) {
     }
   }
 
-  // Long-press on a non-empty cell starts a "move row" drag — the kid can
-  // grab a finished calculation row and drop it elsewhere in this work
-  // block. Suppresses the cursor-positioning click that would otherwise
-  // fire on pointerup. Tracked at the grid level so it can both block the
-  // click and gate dragging on whether the row actually has content.
+  // Long-press on a non-empty cell starts a "move part" drag — the kid
+  // grabs the contiguous run of cells the press lands on (one fraction,
+  // one polynomial term, etc.) and drops it anywhere in the work block,
+  // including sideways. Suppresses the cursor-positioning click that
+  // would otherwise fire on pointerup.
   let suppressNextClick = false;
-  if (onMoveRow) attachRowDrag(grid, block, onMoveRow, () => {
+  if (onMovePart) attachPartDrag(grid, block, onMovePart, () => {
     suppressNextClick = true;
   });
 
@@ -220,14 +221,17 @@ function buildCompositeDOM(cell, activeSlot) {
   return root;
 }
 
-// Long-press → drag a row of calculation to a different row in the same
-// work block. Triggers only on cells that already have content (typing on
-// a blank cell still feels instant). On drop, calls onMoveRow(from, to)
-// and the editor handles the model change + re-render.
-function attachRowDrag(gridEl, block, onMoveRow, onDragStarted) {
+// Long-press → drag a SEGMENT of calculation. A "part" is the contiguous
+// run of non-empty cells in one row that the press point lands on — so a
+// stand-alone fraction, a polynomial term separated by spaces, the `=`
+// sign on its own, etc. each become independently draggable. The drag is
+// 2D: cells can move both vertically (rows) and horizontally (columns)
+// in whole-cell increments. On drop, the editor validates the target
+// area is clear and applies the move.
+function attachPartDrag(gridEl, block, onMovePart, onDragStarted) {
   const LONG_PRESS_MS = 350;
-  // Larger tolerance than the block-drag handle: the kid's finger drifts
-  // a bit on long-press and we don't want to cancel as a "tap".
+  // Slightly larger tolerance than the block-drag handle: a long-press
+  // finger drifts a bit and we don't want every wobble to cancel as a tap.
   const MOVE_TOLERANCE_PX = 8;
 
   let pressState = null;
@@ -237,14 +241,17 @@ function attachRowDrag(gridEl, block, onMoveRow, onDragStarted) {
     const cellEl = event.target.closest('.cell');
     if (!cellEl) return;
     const r = Number(cellEl.dataset.r);
-    if (Number.isNaN(r)) return;
-    if (!rowHasContent(block, r)) return;
+    const c = Number(cellEl.dataset.c);
+    if (Number.isNaN(r) || Number.isNaN(c)) return;
+
+    const part = findPartAt(block, r, c);
+    if (!part) return;
 
     if (pressState && pressState.timer) clearTimeout(pressState.timer);
     const pointerId = event.pointerId;
     pressState = {
       pointerId,
-      r,
+      part,
       startX: event.clientX,
       startY: event.clientY,
       timer: setTimeout(() => fireLongPress(pointerId), LONG_PRESS_MS)
@@ -268,34 +275,44 @@ function attachRowDrag(gridEl, block, onMoveRow, onDragStarted) {
 
   function fireLongPress(pointerId) {
     if (!pressState || pressState.pointerId !== pointerId) return;
-    const sourceRow = pressState.r;
+    const part = pressState.part;
+    const startX = pressState.startX;
+    const startY = pressState.startY;
     pressState = null;
     onDragStarted();
-    startRowDrag(sourceRow, pointerId);
+    startPartDrag(part, pointerId, startX, startY);
   }
 
-  function startRowDrag(sourceRow, pointerId) {
-    const sourceCells = gridEl.querySelectorAll(`.cell[data-r="${sourceRow}"]`);
-    sourceCells.forEach((c) => c.classList.add('cell--row-dragging'));
+  function startPartDrag(part, pointerId, startX, startY) {
+    // Anchor cell DOM elements live in `block.cells`; covered cells of a
+    // wider composite don't render their own DOM. Translate only the
+    // anchors — the composite's grid-column span moves with its anchor.
+    const sourceEls = [];
+    for (let c = part.startCol; c <= part.endCol; c += 1) {
+      const cellEl = gridEl.querySelector(`.cell[data-r="${part.row}"][data-c="${c}"]`);
+      if (cellEl) sourceEls.push(cellEl);
+    }
+    sourceEls.forEach((el) => el.classList.add('cell--part-dragging'));
 
     const cellSize =
       parseFloat(getComputedStyle(gridEl).getPropertyValue('--cell-size')) || 38;
-    let lastTargetRow = sourceRow;
-    paintDropTarget(gridEl, lastTargetRow);
+    let lastDrow = 0;
+    let lastDcol = 0;
 
     const onMove = (event) => {
       if (event.pointerId !== pointerId) return;
-      const rect = gridEl.getBoundingClientRect();
-      const yRel = event.clientY - rect.top;
-      const newTarget = clampNumber(
-        Math.floor(yRel / cellSize),
-        0,
-        block.rows - 1
-      );
-      if (newTarget !== lastTargetRow) {
-        lastTargetRow = newTarget;
-        paintDropTarget(gridEl, lastTargetRow);
-      }
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      const dcol = Math.round(dx / cellSize);
+      const drow = Math.round(dy / cellSize);
+      if (dcol === lastDcol && drow === lastDrow) return;
+      lastDcol = dcol;
+      lastDrow = drow;
+      const valid = canMovePart(block, part, drow, dcol);
+      sourceEls.forEach((el) => {
+        el.style.transform = `translate(${dcol * cellSize}px, ${drow * cellSize}px)`;
+        el.classList.toggle('cell--part-dragging-invalid', !valid);
+      });
     };
 
     const onUp = (event) => {
@@ -303,10 +320,15 @@ function attachRowDrag(gridEl, block, onMoveRow, onDragStarted) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
-      sourceCells.forEach((c) => c.classList.remove('cell--row-dragging'));
-      clearDropTarget(gridEl);
-      if (lastTargetRow !== sourceRow) {
-        onMoveRow(sourceRow, lastTargetRow);
+      sourceEls.forEach((el) => {
+        el.classList.remove('cell--part-dragging', 'cell--part-dragging-invalid');
+        el.style.transform = '';
+      });
+      if (lastDrow === 0 && lastDcol === 0) return;
+      if (canMovePart(block, part, lastDrow, lastDcol)) {
+        onMovePart(part, lastDrow, lastDcol);
+      } else {
+        flashPartRefuse(gridEl, part);
       }
     };
 
@@ -316,28 +338,59 @@ function attachRowDrag(gridEl, block, onMoveRow, onDragStarted) {
   }
 }
 
-function rowHasContent(block, row) {
-  for (const key of Object.keys(block.cells)) {
-    if (Number(key.split(',', 1)[0]) === row) return true;
+// Find the contiguous run of non-empty cells in row `r` that contains
+// column `c`. Returns { row, startCol, endCol } (inclusive) or null if
+// (r, c) is empty. "Non-empty" means: an anchor lives at this cell OR
+// this cell is covered by a wider composite anchored to the left.
+function findPartAt(block, r, c) {
+  const isOccupied = (col) => {
+    if (block.cells[`${r},${col}`]) return true;
+    if (findOccupyingAnchor(block, r, col)) return true;
+    return false;
+  };
+  if (!isOccupied(c)) return null;
+  let startCol = c;
+  while (startCol > 0 && isOccupied(startCol - 1)) startCol -= 1;
+  let endCol = c;
+  while (endCol + 1 < block.cols && isOccupied(endCol + 1)) endCol += 1;
+  return { row: r, startCol, endCol };
+}
+
+// Validate that moving the part by (drow, dcol) lands every anchor and
+// every covered cell on a position that is either empty or already part
+// of the source. Out-of-bounds is also a refusal.
+function canMovePart(block, part, drow, dcol) {
+  if (drow === 0 && dcol === 0) return false;
+  const sourceKeys = new Set();
+  const moves = [];
+  for (let c = part.startCol; c <= part.endCol; c += 1) {
+    const cell = block.cells[`${part.row},${c}`];
+    if (!cell) continue;
+    const w = compositeWidth(cell);
+    moves.push({ oldR: part.row, oldC: c, newR: part.row + drow, newC: c + dcol, w });
+    for (let i = 0; i < w; i += 1) sourceKeys.add(`${part.row},${c + i}`);
   }
-  return false;
+  for (const m of moves) {
+    if (m.newR < 0 || m.newR >= block.rows) return false;
+    if (m.newC < 0 || m.newC + m.w > block.cols) return false;
+    for (let i = 0; i < m.w; i += 1) {
+      const k = `${m.newR},${m.newC + i}`;
+      if (sourceKeys.has(k)) continue;
+      if (block.cells[k]) return false;
+      const overlap = findOccupyingAnchor(block, m.newR, m.newC + i);
+      if (overlap && !sourceKeys.has(`${overlap.r},${overlap.c}`)) return false;
+    }
+  }
+  return true;
 }
 
-function paintDropTarget(gridEl, row) {
-  clearDropTarget(gridEl);
-  gridEl
-    .querySelectorAll(`.cell[data-r="${row}"]`)
-    .forEach((c) => c.classList.add('cell--drop-target'));
-}
-
-function clearDropTarget(gridEl) {
-  gridEl
-    .querySelectorAll('.cell--drop-target')
-    .forEach((c) => c.classList.remove('cell--drop-target'));
-}
-
-function clampNumber(n, lo, hi) {
-  return Math.max(lo, Math.min(hi, n));
+function flashPartRefuse(gridEl, part) {
+  for (let c = part.startCol; c <= part.endCol; c += 1) {
+    const el = gridEl.querySelector(`.cell[data-r="${part.row}"][data-c="${c}"]`);
+    if (!el) continue;
+    el.classList.add('cell--refuse');
+    setTimeout(() => el.classList.remove('cell--refuse'), 260);
+  }
 }
 
 export { cellKey, compositeSlots };

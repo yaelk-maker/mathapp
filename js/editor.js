@@ -363,7 +363,7 @@ export async function mountEditor(root, notebookId) {
             if (keypadMode !== 'math') setKeypadMode('math');
             moveCursor(r, c);
           },
-          onMoveRow: (fromRow, toRow) => moveRowAndSave(block, fromRow, toRow),
+          onMovePart: (part, drow, dcol) => movePartAndSave(block, part, drow, dcol),
           onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
         });
         el = wrapper;
@@ -724,26 +724,32 @@ export async function mountEditor(root, notebookId) {
     await renderBlocks();
   }
 
-  // Long-press row drag drop target — re-key every cell in `block.cells`
-  // so row `fromRow` lands at `toRow` and the rows between shift to fill
-  // the gap (insert semantics, not swap). Active cursor follows the
-  // moving row so the kid keeps editing where they were.
-  async function moveRowAndSave(block, fromRow, toRow) {
-    if (fromRow === toRow) return;
-    const newCells = {};
-    for (const [key, cell] of Object.entries(block.cells)) {
-      const [r, c] = key.split(',').map(Number);
-      let newR = r;
-      if (r === fromRow) newR = toRow;
-      else if (fromRow < toRow && r > fromRow && r <= toRow) newR = r - 1;
-      else if (fromRow > toRow && r >= toRow && r < fromRow) newR = r + 1;
-      newCells[`${newR},${c}`] = cell;
+  // Long-press part drag drop target — relocate every anchor in the
+  // dragged contiguous run by (drow, dcol). The grid validates the move
+  // before calling here, so we trust the offsets are legal. Active cursor
+  // follows if it was inside the part so the kid keeps editing where
+  // they were.
+  async function movePartAndSave(block, part, drow, dcol) {
+    if (drow === 0 && dcol === 0) return;
+    const moves = [];
+    for (let c = part.startCol; c <= part.endCol; c += 1) {
+      const cell = block.cells[`${part.row},${c}`];
+      if (cell) moves.push({ oldR: part.row, oldC: c, cell });
     }
-    block.cells = newCells;
-    if (activeWorkBlock === block) {
-      if (cursor.r === fromRow) cursor.r = toRow;
-      else if (fromRow < toRow && cursor.r > fromRow && cursor.r <= toRow) cursor.r -= 1;
-      else if (fromRow > toRow && cursor.r >= toRow && cursor.r < fromRow) cursor.r += 1;
+    for (const m of moves) {
+      delete block.cells[`${m.oldR},${m.oldC}`];
+    }
+    for (const m of moves) {
+      block.cells[`${m.oldR + drow},${m.oldC + dcol}`] = m.cell;
+    }
+    if (
+      activeWorkBlock === block &&
+      cursor.r === part.row &&
+      cursor.c >= part.startCol &&
+      cursor.c <= part.endCol
+    ) {
+      cursor.r += drow;
+      cursor.c += dcol;
     }
     await savePage(page);
     await renderBlocks();
@@ -1441,8 +1447,8 @@ export async function mountEditor(root, notebookId) {
     const { wrapper: newWrapper, grid: newGrid } = renderWorkBlock(activeWorkBlock, {
       cursor,
       onCellTap: (r, c) => moveCursor(r, c),
-      onMoveRow: (fromRow, toRow) =>
-        moveRowAndSave(activeWorkBlock, fromRow, toRow),
+      onMovePart: (part, drow, dcol) =>
+        movePartAndSave(activeWorkBlock, part, drow, dcol),
       onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
     });
     // Reattach drag + resize handles. Without this they vanish whenever a
