@@ -189,6 +189,14 @@ h1 {
   margin-bottom: 8px;
 }
 
+.editor__actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.editor__actions .btn { font-size: 14px; padding: 8px 14px; }
+
 .editor--full .editor__page {
   flex: 1 1 auto;
   min-height: 0;
@@ -198,9 +206,53 @@ h1 {
   border: 1px solid var(--border);
   border-radius: 8px;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
 }
+
+/* --- Worksheet block --- */
+/* CRITICAL: this block has NO grid background. The grid is only inside
+   WorkBlocks. That separation is the architectural fix vs. ModMath. */
+
+.worksheet {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  max-width: 100%;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.worksheet__image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  background: white;
+}
+
+.worksheet__delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.1s ease;
+}
+.worksheet__delete:active { background: rgba(0, 0, 0, 0.8); }
 
 .editor__keypad-host {
   flex: 0 0 auto;
