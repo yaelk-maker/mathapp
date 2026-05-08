@@ -48,6 +48,7 @@ const LAYOUT = [
     { code: 'RIGHT', label: '→', kind: 'nav' }
   ],
   [
+    { code: 'TOGGLE_KEYPAD', label: 'אבג', kind: 'mode', title: 'מקלדת עברית' },
     { code: '0', label: '0' },
     null,
     { code: '<', label: '<', kind: 'op' },

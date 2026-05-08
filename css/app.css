@@ -663,6 +663,51 @@ h1 {
   flex-grow: 2;
 }
 
+/* Mode-switch key (123 ⇄ אבג) — distinguished so the kid spots it as the
+   keyboard-switch instead of confusing it with a regular character key. */
+.keypad__key--mode {
+  background: #eef3ff;
+  color: var(--accent);
+  font-weight: 700;
+}
+.keypad__key--mode:active { background: #cfdcfb; }
+
+/* --- Work block resize handle --- */
+/* Sits at the bottom-right of the work block. Drag down/right to grow,
+   up/left to shrink. Snaps to whole cells. Helps keep a short solution
+   from leaving a tall blank grid before the next worksheet image. */
+.workblock__resize {
+  position: absolute;
+  bottom: -10px;
+  right: -10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: white;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: nwse-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 4;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.workblock__resize:active {
+  background: var(--accent);
+  color: white;
+}
+.workblock--resizing {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+
 /* --- Image cropper overlay (Phase: bug-fixes) --- */
 
 .crop-overlay {
