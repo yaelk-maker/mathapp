@@ -17,6 +17,7 @@ import {
   deleteStrokeById,
   clearStrokesForPage
 } from './db.js';
+import { exportSingleNotebookToJSON, shareJSON } from './io/export.js';
 import {
   BLOCK,
   newWorkBlock,
@@ -54,13 +55,14 @@ const CHAR_KEYS = new Set([
 
 // Inside a fraction slot we can't open a nested composite (slots are plain
 // strings), but the kid still wants to write things like "x²" or "√2" in a
-// numerator. Map POW/SQRT presses to inline unicode marks so they appear in
-// the slot text. POW cycles ²→³→⁴ when pressed repeatedly so multiple
-// powers are reachable without a dedicated key.
-const SUPERSCRIPT_DIGITS = ['²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
-const SUPERSCRIPT_NEXT = new Map(
-  SUPERSCRIPT_DIGITS.map((s, i) => [s, SUPERSCRIPT_DIGITS[(i + 1) % SUPERSCRIPT_DIGITS.length]])
-);
+// numerator. POW press inside a slot toggles a "sticky superscript" mode:
+// while it's on, each digit pressed is appended as the matching unicode
+// superscript (so x¹² is reachable, not just ²–⁹). SQRT in a slot still
+// appends a literal √.
+const DIGIT_TO_SUPER = new Map([
+  ['0', '⁰'], ['1', '¹'], ['2', '²'], ['3', '³'], ['4', '⁴'],
+  ['5', '⁵'], ['6', '⁶'], ['7', '⁷'], ['8', '⁸'], ['9', '⁹']
+]);
 
 const COMPOSITE_KEYS = {
   FRAC: () => newFractionCell(),
@@ -96,6 +98,12 @@ export async function mountEditor(root, notebookId) {
   let activeWorkBlock = page.blocks.find((b) => b.type === BLOCK.WORK);
   let activeGrid = null;
 
+  // Sticky superscript mode: turned on by POW press inside a slot, turned
+  // off by POW again, by any non-digit input, or by the cursor leaving the
+  // slot. While on, digit presses are converted to ⁰¹²³⁴⁵⁶⁷⁸⁹.
+  let superscriptMode = false;
+  let powKeyEl = null;
+
   // Drawing state
   const strokes = await listStrokesByPage(page.id);
   let pencilEnabled = false;
@@ -123,6 +131,7 @@ export async function mountEditor(root, notebookId) {
         <button class="btn btn--ghost" id="upload-library">🖼️ בחר תמונה</button>
         <button class="btn btn--ghost" id="toggle-split">🔀 פיצול</button>
         <button class="btn btn--ghost" id="print-page">🖨️ הדפסה</button>
+        <button class="btn btn--ghost" id="backup-notebook" title="גיבוי המחברת הזו">💾 גיבוי</button>
         <span class="editor__sep"></span>
         <button class="btn btn--ghost" id="toggle-pen">✏️ ציור</button>
         <span class="pen-tools" id="pen-tools" hidden>
@@ -228,6 +237,25 @@ export async function mountEditor(root, notebookId) {
     window.print();
   });
 
+  // Backup just this notebook from inside the editor — same flow as the
+  // 💾 button on the home-screen card, but operates on the open notebook
+  // so the kid doesn't have to navigate back to save.
+  document.getElementById('backup-notebook').addEventListener('click', async () => {
+    await Promise.all([
+      flushSave(),
+      Promise.allSettled([...pendingStrokeSaves])
+    ]);
+    try {
+      const data = await exportSingleNotebookToJSON(notebookId);
+      const stamp = new Date().toISOString().slice(0, 10);
+      const safeName = (nb.name || 'notebook').replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 40);
+      await shareJSON(data, `mathapp-${safeName}-${stamp}.json`);
+    } catch (err) {
+      console.error('Single-notebook backup failed:', err);
+      alert('הגיבוי נכשל. נסה שוב.');
+    }
+  });
+
   // Pencil toolbar wiring
   const penToolsEl = document.getElementById('pen-tools');
   const penToggleBtn = document.getElementById('toggle-pen');
@@ -264,6 +292,7 @@ export async function mountEditor(root, notebookId) {
 
   const keypad = renderKeypad({ onKey: handleKey });
   document.getElementById('keypad-host').appendChild(keypad);
+  powKeyEl = keypad.querySelector('[data-code="POW"]');
 
   // Set up pencil surface and replay existing strokes
   setupPencilSurface();
@@ -514,6 +543,38 @@ export async function mountEditor(root, notebookId) {
 
   function handleKey(code) {
     if (!activeWorkBlock) return;
+
+    // POW pressed inside a slot toggles sticky superscript mode. We do NOT
+    // auto-insert anything — the kid presses POW then digits to type the
+    // exponent. POW pressed outside a slot still falls through to the
+    // composite-creation path below.
+    if (cursor.slot && code === 'POW') {
+      const cell = getCellAt(cursor.r, cursor.c);
+      if (isComposite(cell)) {
+        setSuperscriptMode(!superscriptMode);
+        return;
+      }
+    }
+
+    // While the mode is on, intercept digit keys and append the matching
+    // superscript char into the slot. Stay in mode so multi-digit exponents
+    // like x¹² work. Backspace is handled separately below and keeps mode.
+    if (cursor.slot && superscriptMode && DIGIT_TO_SUPER.has(code)) {
+      const cell = getCellAt(cursor.r, cursor.c);
+      if (isComposite(cell)) {
+        appendToSlot(cell, cursor.r, cursor.c, cursor.slot, DIGIT_TO_SUPER.get(code));
+        return;
+      }
+      // Cell is no longer a composite — fall through to normal handling.
+    }
+
+    // Any other key drops us out of superscript mode before being processed
+    // normally. Backspace is the one exception so the kid can fix a typo
+    // mid-exponent without losing the mode.
+    if (superscriptMode && code !== 'BACKSPACE') {
+      setSuperscriptMode(false);
+    }
+
     if (CHAR_KEYS.has(code)) {
       insertChar(code);
       return;
@@ -530,6 +591,11 @@ export async function mountEditor(root, notebookId) {
       case 'DOWN': arrowVertical(1); break;
       case 'EXIT': exitComposite(1); break;
     }
+  }
+
+  function setSuperscriptMode(on) {
+    superscriptMode = !!on;
+    if (powKeyEl) powKeyEl.classList.toggle('keypad__key--active', superscriptMode);
   }
 
   function getCellAt(r, c) {
@@ -602,34 +668,6 @@ export async function mountEditor(root, notebookId) {
     queueSave();
   }
 
-  // POW pressed inside a slot: cycle the trailing superscript digit (²→³→⁴…)
-  // if present, otherwise append ². The kid taps once for square, twice for
-  // cube, etc., without us needing a separate key per power.
-  function appendSuperscriptToSlot(cell, r, c, slot) {
-    const current = cell[slot] || '';
-    const last = current.slice(-1);
-    if (SUPERSCRIPT_NEXT.has(last)) {
-      const next = SUPERSCRIPT_NEXT.get(last);
-      return replaceSlotTail(cell, r, c, slot, current.slice(0, -1) + next);
-    }
-    return appendCharToSlot(cell, r, c, slot, '²');
-  }
-
-  // Append a literal char to a slot — same width-expansion guard as
-  // appendToSlot. Kept separate from insertChar's typing path so the kid
-  // can't end up in the "cursor.slot but cell isn't composite" branch.
-  function appendCharToSlot(cell, r, c, slot, ch) {
-    return appendToSlot(cell, r, c, slot, ch);
-  }
-
-  // For superscript cycling: replace the slot value entirely (length stays
-  // the same so we never need to re-check width or rerender the grid).
-  function replaceSlotTail(cell, r, c, slot, newValue) {
-    cell[slot] = newValue;
-    repaintCell(r, c);
-    queueSave();
-  }
-
   // Briefly flash a cell red to indicate "no room — input refused".
   function flashRefuse(r, c) {
     if (!activeGrid) return;
@@ -643,20 +681,15 @@ export async function mountEditor(root, notebookId) {
     const r = cursor.r;
     const c = cursor.c;
     if (cursor.slot) {
-      // Composites can't be nested into a slot's string model, but POW and
-      // SQRT are common enough inside fractions that we handle them inline:
-      // POW appends/cycles a unicode superscript digit, SQRT prepends a √.
-      // FRAC inside a slot still falls through to "exit and create new".
+      // Composites can't be nested into a slot's string model. POW in a
+      // slot is intercepted upstream in handleKey (toggles superscript
+      // mode), so by the time we get here POW means the cursor isn't in
+      // a usable slot. SQRT still maps to a literal √ inline. FRAC falls
+      // through to "exit and create new outside".
       const cell = getCellAt(r, c);
-      if (isComposite(cell)) {
-        if (template.type === 'pow') {
-          return appendSuperscriptToSlot(cell, r, c, cursor.slot);
-        }
-        if (template.type === 'sqrt') {
-          return appendCharToSlot(cell, r, c, cursor.slot, '√');
-        }
+      if (isComposite(cell) && template.type === 'sqrt') {
+        return appendToSlot(cell, r, c, cursor.slot, '√');
       }
-      // FRAC (or any unhandled composite): exit and create new outside.
       exitComposite(1);
       return insertComposite(template);
     }
@@ -894,6 +927,9 @@ export async function mountEditor(root, notebookId) {
     cursor.r = nr;
     cursor.c = nc;
     cursor.slot = effectiveSlot;
+    // Cursor moved or changed slot — sticky superscript mode no longer
+    // applies. Always clear it on a real cursor change.
+    if (superscriptMode) setSuperscriptMode(false);
     updateCursor(activeGrid, prev, cursor, getCellAt);
   }
 

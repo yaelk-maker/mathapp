@@ -663,6 +663,16 @@ h1 {
   flex-grow: 2;
 }
 
+/* When a key represents a sticky mode that's currently on (e.g. POW while
+   the kid is typing a multi-digit superscript), highlight it so the mode
+   isn't invisible. */
+.keypad__key--active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.keypad__key--active:active { background: var(--accent); }
+
 /* --- Image cropper overlay (Phase: bug-fixes) --- */
 
 .crop-overlay {
