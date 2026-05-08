@@ -672,6 +672,34 @@ h1 {
 }
 .keypad__key--mode:active { background: #cfdcfb; }
 
+/* --- Work block delete button --- */
+/* Top-right circle (✕) for removing a work area added by mistake. The
+   editor only renders this when there are 2+ work blocks so the kid can
+   never delete their way to a notebook with no place to type. */
+.workblock__delete {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 5;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.workblock__delete:active { background: rgba(192, 57, 43, 0.85); }
+
 /* --- Work block resize handle --- */
 /* Sits at the bottom-right of the work block. Drag down/right to grow,
    up/left to shrink. Snaps to whole cells. Helps keep a short solution
