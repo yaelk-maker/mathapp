@@ -2,11 +2,10 @@ import {
   listNotebooks,
   createNotebook,
   deleteNotebook,
-  renameNotebook,
   getNotebook,
-  listPages,
   requestPersistentStorage
 } from './db.js';
+import { mountEditor } from './editor.js';
 
 const root = document.getElementById('app');
 
@@ -100,39 +99,7 @@ async function renderHome() {
 }
 
 async function renderEditor(notebookId) {
-  const nb = await getNotebook(notebookId);
-  if (!nb) {
-    window.location.hash = '';
-    return;
-  }
-  const pages = await listPages(notebookId);
-
-  root.innerHTML = `
-    <div class="editor">
-      <div class="editor__topbar">
-        <button class="editor__back" id="back-home">→ חזרה</button>
-        <h2 class="editor__title" id="title">${escapeHtml(nb.name)}</h2>
-        <button class="btn btn--ghost" id="rename">שנה שם</button>
-      </div>
-      <div class="editor__page">
-        <div class="placeholder-text">
-          דף ${pages.length} מוכן.<br>
-          (Phase 2 יוסיף את לוח המקשים והמשבצות לכתיבת תרגילים.)
-        </div>
-      </div>
-    </div>
-  `;
-
-  document.getElementById('back-home').addEventListener('click', () => {
-    window.location.hash = '';
-  });
-
-  document.getElementById('rename').addEventListener('click', async () => {
-    const name = window.prompt('שם חדש למחברת:', nb.name);
-    if (!name || !name.trim() || name.trim() === nb.name) return;
-    await renameNotebook(notebookId, name.trim());
-    await render();
-  });
+  await mountEditor(root, notebookId);
 }
 
 function escapeHtml(s) {

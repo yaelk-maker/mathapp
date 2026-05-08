@@ -175,6 +175,155 @@ h1 {
   line-height: 1.6;
 }
 
+/* ===== Editor + grid + keypad (Phase 2) ===== */
+
+.editor--full {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 8px;
+  max-width: none;
+}
+
+.editor--full .editor__topbar {
+  margin-bottom: 8px;
+}
+
+.editor--full .editor__page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.editor__keypad-host {
+  flex: 0 0 auto;
+  margin-top: 8px;
+}
+
+/* --- Work block grid --- */
+
+.workblock {
+  /* Math is always LTR, even on RTL pages. */
+  display: inline-block;
+}
+
+.grid {
+  --cell-size: 38px;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--cell-size));
+  grid-template-rows: repeat(var(--rows), var(--cell-size));
+  background: white;
+  border-top: 1px solid #b8b8b8;
+  border-left: 1px solid #b8b8b8;
+  font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  font-size: calc(var(--cell-size) * 0.62);
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cell {
+  width: var(--cell-size);
+  height: var(--cell-size);
+  border-right: 1px solid #d8d8d8;
+  border-bottom: 1px solid #d8d8d8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  color: #111;
+  position: relative;
+}
+
+/* Heavier line every 5 columns/rows for readability (like graph paper) */
+.cell[data-c="4"], .cell[data-c="9"], .cell[data-c="14"], .cell[data-c="19"] {
+  border-right-color: #b8b8b8;
+}
+.cell[data-r="4"], .cell[data-r="9"], .cell[data-r="14"], .cell[data-r="19"] {
+  border-bottom-color: #b8b8b8;
+}
+
+.cell--cursor {
+  background: rgba(11, 108, 242, 0.14);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  z-index: 1;
+}
+
+/* --- Keypad --- */
+
+.keypad {
+  background: #f0f0f0;
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.keypad__row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.keypad__gap {
+  width: 12px;
+}
+
+.keypad__key {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 22px;
+  font-weight: 600;
+  font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  background: white;
+  border: 1px solid #c8c8c8;
+  border-radius: 8px;
+  color: #111;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  padding: 6px 8px;
+  transition: background 0.05s ease, transform 0.05s ease;
+}
+
+.keypad__key:active {
+  background: #d8e6fb;
+  transform: translateY(1px);
+}
+
+.keypad__key--op {
+  background: #f7faff;
+  color: var(--accent);
+}
+.keypad__key--op:active { background: #c2d8fb; }
+
+.keypad__key--nav {
+  background: #f5f5f5;
+  color: #555;
+  font-size: 20px;
+}
+
+.keypad__key--edit {
+  background: #fff2f2;
+  color: var(--danger);
+}
+.keypad__key--edit:active { background: #fbd5d5; }
+
+.keypad__key--wide {
+  flex-grow: 2;
+}
+
 /* iPadOS PWA standalone polish */
 @media (display-mode: standalone) {
   body { background: var(--bg); }

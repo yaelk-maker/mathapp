@@ -1,12 +1,15 @@
-const CACHE = 'mathapp-shell-v1';
+const CACHE = 'mathapp-shell-v2';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './css/app.css',
   './js/main.js',
+  './js/editor.js',
   './js/db.js',
   './js/page-model.js',
+  './js/render/grid.js',
+  './js/input/keypad.js',
   './vendor/idb.js',
   './icons/icon-180.png',
   './icons/icon-192.png',
