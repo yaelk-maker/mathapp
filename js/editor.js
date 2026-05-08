@@ -109,6 +109,7 @@ export async function mountEditor(root, notebookId) {
       <div class="editor__actions">
         <button class="btn btn--ghost" id="upload-photo">📷 צלם דף</button>
         <button class="btn btn--ghost" id="upload-library">🖼️ בחר תמונה</button>
+        <button class="btn btn--ghost" id="print-page">🖨️ הדפסה</button>
         <span class="editor__sep"></span>
         <button class="btn btn--ghost" id="toggle-pen">✏️ ציור</button>
         <span class="pen-tools" id="pen-tools" hidden>
@@ -153,6 +154,43 @@ export async function mountEditor(root, notebookId) {
   document.getElementById('upload-library').addEventListener('click', () =>
     addWorksheet({ capture: false })
   );
+
+  // Print: snapshot the canvas as an <img> in place so drawings make it
+  // into the PDF (browsers don't reliably print absolute-positioned canvas).
+  let printSnapshotImg = null;
+  function injectPrintSnapshot() {
+    if (!canvas) return;
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      printSnapshotImg = document.createElement('img');
+      printSnapshotImg.className = 'pencil-print-snapshot';
+      printSnapshotImg.src = dataUrl;
+      printSnapshotImg.style.position = 'absolute';
+      printSnapshotImg.style.top = canvas.style.top;
+      printSnapshotImg.style.left = canvas.style.left;
+      printSnapshotImg.style.width = canvas.style.width;
+      printSnapshotImg.style.height = canvas.style.height;
+      printSnapshotImg.style.pointerEvents = 'none';
+      canvas.parentElement.appendChild(printSnapshotImg);
+      canvas.style.visibility = 'hidden';
+    } catch (err) {
+      console.warn('Could not snapshot canvas for print:', err);
+    }
+  }
+  function removePrintSnapshot() {
+    if (printSnapshotImg) {
+      printSnapshotImg.remove();
+      printSnapshotImg = null;
+    }
+    if (canvas) canvas.style.visibility = '';
+  }
+  window.addEventListener('beforeprint', injectPrintSnapshot);
+  window.addEventListener('afterprint', removePrintSnapshot);
+
+  document.getElementById('print-page').addEventListener('click', () => {
+    flushSave();
+    window.print();
+  });
 
   // Pencil toolbar wiring
   const penToolsEl = document.getElementById('pen-tools');
@@ -211,6 +249,8 @@ export async function mountEditor(root, notebookId) {
   const cleanup = () => {
     document.removeEventListener('keydown', keydownHandler);
     window.removeEventListener('resize', resizeAndReplay);
+    window.removeEventListener('beforeprint', injectPrintSnapshot);
+    window.removeEventListener('afterprint', removePrintSnapshot);
     resizeObserver.disconnect();
     detachPencilIfAny();
     flushSave();

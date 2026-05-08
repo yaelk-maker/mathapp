@@ -534,3 +534,51 @@ h1 {
 @media (display-mode: standalone) {
   body { background: var(--bg); }
 }
+
+/* --- Print stylesheet (Phase 6) --- */
+/* Hide all UI chrome; show only the page content (worksheet + grid + the
+   pencil snapshot image). The kid's iPadOS share sheet "Print → Save as PDF"
+   uses these rules to make a clean printout. */
+
+@media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { background: white; }
+  .editor__topbar,
+  .editor__actions,
+  .editor__keypad-host,
+  .pencil-canvas,
+  #app > .screen .toolbar,
+  .notebook-card__delete {
+    display: none !important;
+  }
+  .editor--full {
+    padding: 0;
+    min-height: 0;
+  }
+  .editor__page-wrap {
+    position: static;
+  }
+  .editor__page {
+    overflow: visible !important;
+    border: none !important;
+    border-radius: 0 !important;
+    height: auto !important;
+    background: white !important;
+    padding: 0 !important;
+  }
+  .pencil-print-snapshot {
+    display: block !important;
+  }
+  .grid {
+    border-color: #999 !important;
+  }
+  .cell {
+    border-right-color: #bbb !important;
+    border-bottom-color: #bbb !important;
+  }
+  /* Avoid splitting a worksheet image across pages */
+  .worksheet, .workblock {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

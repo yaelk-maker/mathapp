@@ -6,6 +6,13 @@ import {
   requestPersistentStorage
 } from './db.js';
 import { mountEditor } from './editor.js';
+import {
+  exportNotebooksToJSON,
+  downloadJSON,
+  importNotebooksFromJSON,
+  pickJSONFile,
+  readJSONFile
+} from './io/export.js';
 
 const root = document.getElementById('app');
 
@@ -42,6 +49,8 @@ async function renderHome() {
       <h1>MathApp</h1>
       <div class="toolbar">
         <button class="btn" id="new-notebook">+ מחברת חדשה</button>
+        <button class="btn btn--ghost" id="backup-all">💾 גיבוי</button>
+        <button class="btn btn--ghost" id="restore-all">📥 שחזור</button>
       </div>
       ${
         notebooks.length === 0
@@ -74,6 +83,31 @@ async function renderHome() {
     if (!name || !name.trim()) return;
     const nb = await createNotebook(name.trim());
     window.location.hash = `#/notebook/${nb.id}`;
+  });
+
+  document.getElementById('backup-all').addEventListener('click', async () => {
+    try {
+      const data = await exportNotebooksToJSON();
+      const stamp = new Date().toISOString().slice(0, 10);
+      await downloadJSON(data, `mathapp-backup-${stamp}.json`);
+    } catch (err) {
+      console.error('Backup failed:', err);
+      alert('הגיבוי נכשל. נסה שוב.');
+    }
+  });
+
+  document.getElementById('restore-all').addEventListener('click', async () => {
+    const file = await pickJSONFile();
+    if (!file) return;
+    try {
+      const json = await readJSONFile(file);
+      const count = await importNotebooksFromJSON(json);
+      alert(`שוחזרו ${count} מחברות.`);
+      await render();
+    } catch (err) {
+      console.error('Restore failed:', err);
+      alert('שחזור נכשל: ' + (err.message || 'קובץ לא תקין'));
+    }
   });
 
   for (const card of document.querySelectorAll('.notebook-card')) {
