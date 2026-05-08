@@ -9,6 +9,12 @@
 // it visually matches a physical Hebrew QWERTY. Setting the wrapper to
 // dir="rtl" would mirror the row order, which is exactly the bug we just
 // fixed.
+//
+// Hebrew typing in the grid flows RTL (cursor advances left after each
+// letter — see handleHebrewKey in editor.js). Arrow keys are exposed here
+// so the kid can fix a single Hebrew letter without backspacing through.
+
+import { buildSection } from './keypad.js';
 
 const ROWS = [
   ['ק', 'ר', 'א', 'ט', 'ו', 'ן', 'ם', 'פ'],
@@ -21,17 +27,19 @@ export function renderHebrewKeypad({ onKey }) {
   wrapper.className = 'keypad keypad--hebrew';
   wrapper.setAttribute('dir', 'ltr');
 
+  // Letters are still flexed into rows — Hebrew QWERTY has variable widths
+  // per row, so flex matches a physical keyboard better than a grid.
+  const lettersBlock = document.createElement('div');
+  lettersBlock.className = 'keypad__letters';
   for (const letters of ROWS) {
     const rowEl = document.createElement('div');
     rowEl.className = 'keypad__row';
     for (const ch of letters) {
       rowEl.appendChild(makeKey(ch, ch, 'letter', onKey));
     }
-    wrapper.appendChild(rowEl);
+    lettersBlock.appendChild(rowEl);
   }
-
-  // Bottom action row (LTR): mode-switch, punctuation, space, newline,
-  // backspace. Punctuation is small to keep the row compact.
+  // Bottom action row (LTR): mode-switch, punctuation, space, newline.
   const actionRow = document.createElement('div');
   actionRow.className = 'keypad__row';
   actionRow.appendChild(makeKey('TOGGLE_KEYPAD', '123', 'mode', onKey));
@@ -43,8 +51,31 @@ export function renderHebrewKeypad({ onKey }) {
   space.classList.add('keypad__key--wide');
   actionRow.appendChild(space);
   actionRow.appendChild(makeKey('NEWLINE', '↵', 'nav', onKey));
-  actionRow.appendChild(makeKey('BACKSPACE', '⌫', 'edit', onKey));
-  wrapper.appendChild(actionRow);
+  lettersBlock.appendChild(actionRow);
+  wrapper.appendChild(lettersBlock);
+
+  // Symmetric arrow cross + backspace, same layout as the math keypad so
+  // the navigation muscle memory carries between modes.
+  wrapper.appendChild(
+    buildSection(
+      {
+        name: 'arrows',
+        cols: 3,
+        keys: [
+          null,
+          { code: 'UP', label: '↑', kind: 'nav' },
+          null,
+          { code: 'LEFT', label: '←', kind: 'nav' },
+          { code: 'DOWN', label: '↓', kind: 'nav' },
+          { code: 'RIGHT', label: '→', kind: 'nav' },
+          null,
+          { code: 'BACKSPACE', label: '⌫', kind: 'edit' },
+          null
+        ]
+      },
+      onKey
+    )
+  );
 
   return wrapper;
 }

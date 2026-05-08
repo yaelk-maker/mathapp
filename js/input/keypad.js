@@ -4,95 +4,123 @@
 //                                       '<', '>', '≤', '≥'
 //   composite-creating keys: 'FRAC', 'POW', 'SQRT'
 //   actions: 'BACKSPACE', 'LEFT', 'RIGHT', 'UP', 'DOWN', 'EXIT'
+//
+// The keypad renders as a row of independent SECTIONS, each its own CSS grid.
+// This is what gives the digits a clean 3x3 (with 0 centered below) and the
+// arrows a true symmetric cross — flexbox alone couldn't keep the columns
+// aligned across rows.
 
-const LAYOUT = [
-  [
-    { code: '7', label: '7' },
-    { code: '8', label: '8' },
-    { code: '9', label: '9' },
-    null,
-    { code: '+', label: '+', kind: 'op' },
-    { code: '−', label: '−', kind: 'op' },
-    { code: '%', label: '%', kind: 'op' },
-    null,
-    { code: '(', label: '(', kind: 'op' },
-    { code: ')', label: ')', kind: 'op' },
-    null,
-    { code: 'BACKSPACE', label: '⌫', kind: 'edit' }
-  ],
-  [
-    { code: '4', label: '4' },
-    { code: '5', label: '5' },
-    { code: '6', label: '6' },
-    null,
-    { code: '×', label: '×', kind: 'op' },
-    { code: '÷', label: '÷', kind: 'op' },
-    null,
-    { code: '.', label: '·', kind: 'op', title: 'נקודה עשרונית' },
-    { code: '=', label: '=', kind: 'op' },
-    null,
-    { code: 'UP', label: '↑', kind: 'nav' }
-  ],
-  [
-    { code: '1', label: '1' },
-    { code: '2', label: '2' },
-    { code: '3', label: '3' },
-    null,
-    { code: 'x', label: 'x', kind: 'var' },
-    { code: 'y', label: 'y', kind: 'var' },
-    { code: 'a', label: 'a', kind: 'var' },
-    { code: 'b', label: 'b', kind: 'var' },
-    null,
-    { code: 'LEFT', label: '←', kind: 'nav' },
-    { code: 'DOWN', label: '↓', kind: 'nav' },
-    { code: 'RIGHT', label: '→', kind: 'nav' }
-  ],
-  [
-    { code: 'TOGGLE_KEYPAD', label: 'אבג', kind: 'mode', title: 'מקלדת עברית' },
-    { code: '0', label: '0' },
-    null,
-    { code: '<', label: '<', kind: 'op' },
-    { code: '>', label: '>', kind: 'op' },
-    { code: '≤', label: '≤', kind: 'op' },
-    { code: '≥', label: '≥', kind: 'op' },
-    null,
-    { code: 'FRAC', label: '½', kind: 'comp', title: 'שבר' },
-    { code: 'POW', label: 'xⁿ', kind: 'comp', title: 'חזקה' },
-    { code: 'SQRT', label: '√', kind: 'comp', title: 'שורש' },
-    null,
-    { code: 'EXIT', label: '⏎', kind: 'edit', title: 'יציאה משבר/חזקה' }
-  ]
+// Each section: { name, cols, keys }. keys is a flat list, row-major; null
+// is a placeholder (renders as an invisible button so the grid keeps its
+// column structure).
+const SECTIONS = [
+  {
+    name: 'digits',
+    cols: 3,
+    keys: [
+      { code: '7', label: '7' },
+      { code: '8', label: '8' },
+      { code: '9', label: '9' },
+      { code: '4', label: '4' },
+      { code: '5', label: '5' },
+      { code: '6', label: '6' },
+      { code: '1', label: '1' },
+      { code: '2', label: '2' },
+      { code: '3', label: '3' },
+      null,
+      { code: '0', label: '0' },
+      null
+    ]
+  },
+  {
+    name: 'ops',
+    cols: 4,
+    keys: [
+      { code: '+', label: '+', kind: 'op' },
+      { code: '−', label: '−', kind: 'op' },
+      { code: '×', label: '×', kind: 'op' },
+      { code: '÷', label: '÷', kind: 'op' },
+      { code: '(', label: '(', kind: 'op' },
+      { code: ')', label: ')', kind: 'op' },
+      { code: '.', label: '·', kind: 'op', title: 'נקודה עשרונית' },
+      { code: '=', label: '=', kind: 'op' },
+      { code: '<', label: '<', kind: 'op' },
+      { code: '>', label: '>', kind: 'op' },
+      { code: '≤', label: '≤', kind: 'op' },
+      { code: '≥', label: '≥', kind: 'op' },
+      { code: 'x', label: 'x', kind: 'var' },
+      { code: 'y', label: 'y', kind: 'var' },
+      { code: 'a', label: 'a', kind: 'var' },
+      { code: 'b', label: 'b', kind: 'var' }
+    ]
+  },
+  {
+    name: 'composites',
+    cols: 3,
+    keys: [
+      { code: 'FRAC', label: '½', kind: 'comp', title: 'שבר' },
+      { code: 'POW', label: 'xⁿ', kind: 'comp', title: 'חזקה' },
+      { code: 'SQRT', label: '√', kind: 'comp', title: 'שורש' },
+      { code: '%', label: '%', kind: 'op' },
+      { code: 'EXIT', label: '⏎', kind: 'edit', title: 'יציאה משבר/חזקה' },
+      { code: 'TOGGLE_KEYPAD', label: 'אבג', kind: 'mode', title: 'מקלדת עברית' }
+    ]
+  },
+  {
+    name: 'arrows',
+    cols: 3,
+    keys: [
+      null,
+      { code: 'UP', label: '↑', kind: 'nav' },
+      null,
+      { code: 'LEFT', label: '←', kind: 'nav' },
+      { code: 'DOWN', label: '↓', kind: 'nav' },
+      { code: 'RIGHT', label: '→', kind: 'nav' },
+      null,
+      { code: 'BACKSPACE', label: '⌫', kind: 'edit' },
+      null
+    ]
+  }
 ];
 
 export function renderKeypad({ onKey }) {
   const wrapper = document.createElement('div');
-  wrapper.className = 'keypad';
+  wrapper.className = 'keypad keypad--sectioned';
   wrapper.setAttribute('dir', 'ltr');
 
-  for (const row of LAYOUT) {
-    const rowEl = document.createElement('div');
-    rowEl.className = 'keypad__row';
-    for (const button of row) {
-      if (!button) {
-        const gap = document.createElement('div');
-        gap.className = 'keypad__gap';
-        rowEl.appendChild(gap);
-        continue;
-      }
-      const el = document.createElement('button');
-      el.className = `keypad__key ${button.kind ? `keypad__key--${button.kind}` : ''}`;
-      el.type = 'button';
-      el.textContent = button.label;
-      el.dataset.code = button.code;
-      if (button.title) el.title = button.title;
-      el.addEventListener('mousedown', (e) => e.preventDefault());
-      el.addEventListener('click', () => onKey(button.code));
-      rowEl.appendChild(el);
-    }
-    wrapper.appendChild(rowEl);
+  for (const section of SECTIONS) {
+    wrapper.appendChild(buildSection(section, onKey));
   }
 
   return wrapper;
+}
+
+export function buildSection(section, onKey) {
+  const el = document.createElement('div');
+  el.className = `keypad__section keypad__section--${section.name}`;
+  el.style.gridTemplateColumns = `repeat(${section.cols}, 1fr)`;
+  for (const button of section.keys) {
+    if (!button) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'keypad__placeholder';
+      el.appendChild(placeholder);
+      continue;
+    }
+    el.appendChild(makeKey(button, onKey));
+  }
+  return el;
+}
+
+function makeKey(button, onKey) {
+  const el = document.createElement('button');
+  el.className = `keypad__key ${button.kind ? `keypad__key--${button.kind}` : ''}`;
+  el.type = 'button';
+  el.textContent = button.label;
+  el.dataset.code = button.code;
+  if (button.title) el.title = button.title;
+  el.addEventListener('mousedown', (e) => e.preventDefault());
+  el.addEventListener('click', () => onKey(button.code));
+  return el;
 }
 
 export function keyboardEventToCode(event) {
