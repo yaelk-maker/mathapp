@@ -119,6 +119,11 @@ export async function mountEditor(root, notebookId) {
   let detachPencil = null;
   const liveStrokes = new Map(); // strokeId -> stroke being drawn
   const liveDrawnPointCount = new Map(); // strokeId -> last drawn index
+  // Block offset captured at stroke start. The block can't move during a
+  // single stroke (the user is drawing on it), so caching at start lets us
+  // translate incoming points to block-relative coords without re-measuring
+  // the DOM on every pointermove.
+  const liveStrokeOffsets = new Map(); // strokeId -> { x, y }
   // In-flight stroke save promises. Cleanup must await these so the kid never
   // loses a stroke by tapping "back" right after lifting the Pencil.
   const pendingStrokeSaves = new Set();
@@ -529,32 +534,36 @@ export async function mountEditor(root, notebookId) {
     if (!block) return;
     if (!window.confirm('להסיר את הדף הזה? המשבצות שלמטה יישמרו.')) return;
 
-    // For worksheet blocks: also delete any pen strokes that were drawn on
-    // top of it. Without this, the strokes would float in empty space after
-    // the image is gone. Strokes are page-scoped; we identify the ones to
-    // delete by which fall within the worksheet's vertical extent on the
-    // canvas (canvas coords = pageContent-relative pixels, same coord
-    // system stroke points are stored in).
-    if (block.type === BLOCK.WORKSHEET) {
+    // Delete any strokes that belong to this block. Strokes anchored to the
+    // block by id (the modern path) are removed directly. Legacy unanchored
+    // strokes are matched by spatial overlap with the block's vertical
+    // extent — same fallback as before, kept so old notebooks still
+    // self-clean when the user removes a block.
+    {
       const figure = pageHost.querySelector(`[data-block-id="${blockId}"]`);
+      let yTop = -Infinity;
+      let yBottom = -Infinity;
       if (figure && pageContent) {
         const figRect = figure.getBoundingClientRect();
         const contentRect = pageContent.getBoundingClientRect();
-        const yTop = figRect.top - contentRect.top;
-        const yBottom = figRect.bottom - contentRect.top;
-        // Wait for any in-flight saves so we don't race with stroke writes.
-        await Promise.allSettled([...pendingStrokeSaves]);
-        const toDelete = strokes.filter((s) =>
-          (s.points || []).some((p) => p.y >= yTop && p.y <= yBottom)
-        );
-        for (const stroke of toDelete) {
-          try { await deleteStrokeById(stroke.id); } catch (_) {}
+        yTop = figRect.top - contentRect.top;
+        yBottom = figRect.bottom - contentRect.top;
+      }
+      // Wait for any in-flight saves so we don't race with stroke writes.
+      await Promise.allSettled([...pendingStrokeSaves]);
+      const toDelete = strokes.filter((s) => {
+        if (s.blockId === blockId) return true;
+        if (!s.blockId && yTop !== -Infinity) {
+          return (s.points || []).some((p) => p.y >= yTop && p.y <= yBottom);
         }
-        // Drop deleted strokes from in-memory array.
-        const deletedIds = new Set(toDelete.map((s) => s.id));
-        for (let i = strokes.length - 1; i >= 0; i -= 1) {
-          if (deletedIds.has(strokes[i].id)) strokes.splice(i, 1);
-        }
+        return false;
+      });
+      for (const stroke of toDelete) {
+        try { await deleteStrokeById(stroke.id); } catch (_) {}
+      }
+      const deletedIds = new Set(toDelete.map((s) => s.id));
+      for (let i = strokes.length - 1; i >= 0; i -= 1) {
+        if (deletedIds.has(strokes[i].id)) strokes.splice(i, 1);
       }
     }
 
@@ -604,6 +613,60 @@ export async function mountEditor(root, notebookId) {
 
   // ---------- pencil drawing ----------
 
+  // Translate a canvas-relative point into a block-relative one by
+  // subtracting the block's top-left offset. Pressure (p) and timestamp (t)
+  // pass through unchanged.
+  function relativizePoint(point, offset) {
+    return {
+      ...point,
+      x: point.x - (offset?.x || 0),
+      y: point.y - (offset?.y || 0)
+    };
+  }
+
+  // Find which rendered block contains a given canvas-relative point.
+  // Returns { id, offset } or null when the point falls in a gap (above the
+  // first block, between blocks, or below the last). Such strokes are saved
+  // as page-anchored.
+  function findBlockAtPoint(point) {
+    if (!pageHost || !pageContent) return null;
+    const contentRect = pageContent.getBoundingClientRect();
+    for (const el of pageHost.children) {
+      if (!el.dataset || !el.dataset.blockId) continue;
+      const rect = el.getBoundingClientRect();
+      const top = rect.top - contentRect.top;
+      const bottom = rect.bottom - contentRect.top;
+      if (point.y >= top && point.y <= bottom) {
+        return {
+          id: el.dataset.blockId,
+          offset: { x: rect.left - contentRect.left, y: top }
+        };
+      }
+    }
+    return null;
+  }
+
+  // Read the current top-left of a block within canvas coords. Returns null
+  // when the block is no longer rendered (caller decides what to do —
+  // replay treats null as "skip orphan stroke").
+  function getBlockOffset(blockId) {
+    if (!blockId) return null;
+    const el = pageHost && pageHost.querySelector(`[data-block-id="${blockId}"]`);
+    if (!el || !pageContent) return null;
+    const rect = el.getBoundingClientRect();
+    const contentRect = pageContent.getBoundingClientRect();
+    return { x: rect.left - contentRect.left, y: rect.top - contentRect.top };
+  }
+
+  // Used by replayStrokes — translates a stored stroke into its current
+  // canvas position. Legacy unanchored strokes return null (render in place);
+  // strokes whose block has been removed return false (skip rendering).
+  function offsetForStroke(stroke) {
+    if (!stroke.blockId) return null;
+    const off = getBlockOffset(stroke.blockId);
+    return off || false;
+  }
+
   function setupPencilSurface() {
     detachPencilIfAny();
     detachPencil = attachPencilSurface(canvas, {
@@ -621,31 +684,42 @@ export async function mountEditor(root, notebookId) {
         const id = `stroke_${Date.now().toString(36)}_${Math.random()
           .toString(36)
           .slice(2, 6)}`;
+        // Anchor the stroke to whichever block contains its first point.
+        // Points are then stored block-relative so the stroke moves with
+        // the block when it's reordered. If the start falls in the gap
+        // between blocks, the stroke is page-anchored (blockId = null).
+        const found = findBlockAtPoint(point);
+        const blockId = found ? found.id : null;
+        const blockOffset = found ? found.offset : { x: 0, y: 0 };
+        liveStrokeOffsets.set(id, blockOffset);
+        const relPoint = relativizePoint(point, blockOffset);
         const stroke = {
           id,
           pageId: page.id,
+          blockId,
           color,
           width,
           eraser,
-          points: [point],
+          points: [relPoint],
           createdAt: Date.now()
         };
         liveStrokes.set(id, stroke);
         liveDrawnPointCount.set(id, 0);
         strokes.push(stroke);
-        // Render the initial dot
+        // Render the initial dot translated by the cached block offset.
         const dpr = window.devicePixelRatio || 1;
-        renderStroke(ctx, stroke, dpr);
+        renderStroke(ctx, stroke, dpr, blockOffset);
         liveDrawnPointCount.set(id, 1);
         return id;
       },
       onStrokePoint: (id, point) => {
         const stroke = liveStrokes.get(id);
         if (!stroke) return;
-        stroke.points.push(point);
+        const blockOffset = liveStrokeOffsets.get(id) || { x: 0, y: 0 };
+        stroke.points.push(relativizePoint(point, blockOffset));
         const from = liveDrawnPointCount.get(id) || 0;
         const dpr = window.devicePixelRatio || 1;
-        renderStrokeIncremental(ctx, stroke, from, dpr);
+        renderStrokeIncremental(ctx, stroke, from, dpr, blockOffset);
         liveDrawnPointCount.set(id, stroke.points.length);
       },
       onStrokeEnd: (id) => {
@@ -653,6 +727,7 @@ export async function mountEditor(root, notebookId) {
         if (!stroke) return;
         liveStrokes.delete(id);
         liveDrawnPointCount.delete(id);
+        liveStrokeOffsets.delete(id);
         const savePromise = addStroke(stroke).catch((err) => {
           console.error('Failed to save stroke:', err);
         });
@@ -694,7 +769,7 @@ export async function mountEditor(root, notebookId) {
     // Size against the content wrapper (whose size is driven by the blocks).
     // The canvas lives inside the scrollable page so it scrolls with content.
     sizeCanvas(canvas, pageContent);
-    replayStrokes(canvas, strokes);
+    replayStrokes(canvas, strokes, offsetForStroke);
     canvas.classList.toggle('pencil-canvas--active', pencilEnabled);
   }
 
@@ -709,7 +784,7 @@ export async function mountEditor(root, notebookId) {
     } catch (err) {
       console.error('Undo delete failed:', err);
     }
-    replayStrokes(canvas, strokes);
+    replayStrokes(canvas, strokes, offsetForStroke);
   }
 
   async function clearAllStrokes() {
@@ -730,7 +805,7 @@ export async function mountEditor(root, notebookId) {
     for (let i = strokes.length - 1; i >= 0; i -= 1) {
       if (idSet.has(strokes[i].id)) strokes.splice(i, 1);
     }
-    replayStrokes(canvas, strokes);
+    replayStrokes(canvas, strokes, offsetForStroke);
   }
 
   // ---------- input dispatch ----------
