@@ -69,7 +69,19 @@ const SECTIONS = [
     cols: 2,
     keys: [
       { code: '%', label: '%', kind: 'op' },
-      { code: 'FRAC', label: 'a/b', kind: 'comp', title: 'שבר' },
+      // Render the fraction key as a true stacked a/b — a tiny bar between
+      // numerator and denominator — so it visually matches what the key
+      // produces in the grid (rather than the literal text "a/b").
+      {
+        code: 'FRAC',
+        kind: 'comp',
+        title: 'שבר',
+        html: '<span class="keypad__frac">'
+            + '<span class="keypad__frac-num">a</span>'
+            + '<span class="keypad__frac-bar"></span>'
+            + '<span class="keypad__frac-den">b</span>'
+            + '</span>'
+      },
       { code: 'UP', label: '↑', kind: 'nav', span: 2 },
       { code: 'LEFT', label: '←', kind: 'nav' },
       { code: 'RIGHT', label: '→', kind: 'nav' },

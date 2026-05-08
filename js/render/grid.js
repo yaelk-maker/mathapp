@@ -13,7 +13,7 @@ import {
 } from '../page-model.js';
 
 export function renderWorkBlock(block, options = {}) {
-  const { onCellTap, cursor, onDelete } = options;
+  const { onCellTap, cursor, onDelete, onMoveRow } = options;
 
   const wrapper = document.createElement('div');
   wrapper.className = 'workblock';
@@ -57,13 +57,30 @@ export function renderWorkBlock(block, options = {}) {
     }
   }
 
+  // Long-press on a non-empty cell starts a "move row" drag — the kid can
+  // grab a finished calculation row and drop it elsewhere in this work
+  // block. Suppresses the cursor-positioning click that would otherwise
+  // fire on pointerup. Tracked at the grid level so it can both block the
+  // click and gate dragging on whether the row actually has content.
+  let suppressNextClick = false;
+  if (onMoveRow) attachRowDrag(grid, block, onMoveRow, () => {
+    suppressNextClick = true;
+  });
+
   if (onCellTap) {
     grid.addEventListener('click', (event) => {
+      if (suppressNextClick) {
+        suppressNextClick = false;
+        return;
+      }
       const target = event.target.closest('.cell');
       if (!target) return;
       const r = Number(target.dataset.r);
       const c = Number(target.dataset.c);
       onCellTap(r, c);
+    });
+    grid.addEventListener('pointerdown', () => {
+      suppressNextClick = false;
     });
   }
 
@@ -201,6 +218,126 @@ function buildCompositeDOM(cell, activeSlot) {
   }
 
   return root;
+}
+
+// Long-press → drag a row of calculation to a different row in the same
+// work block. Triggers only on cells that already have content (typing on
+// a blank cell still feels instant). On drop, calls onMoveRow(from, to)
+// and the editor handles the model change + re-render.
+function attachRowDrag(gridEl, block, onMoveRow, onDragStarted) {
+  const LONG_PRESS_MS = 350;
+  // Larger tolerance than the block-drag handle: the kid's finger drifts
+  // a bit on long-press and we don't want to cancel as a "tap".
+  const MOVE_TOLERANCE_PX = 8;
+
+  let pressState = null;
+
+  gridEl.addEventListener('pointerdown', (event) => {
+    if (event.button != null && event.button !== 0) return;
+    const cellEl = event.target.closest('.cell');
+    if (!cellEl) return;
+    const r = Number(cellEl.dataset.r);
+    if (Number.isNaN(r)) return;
+    if (!rowHasContent(block, r)) return;
+
+    if (pressState && pressState.timer) clearTimeout(pressState.timer);
+    const pointerId = event.pointerId;
+    pressState = {
+      pointerId,
+      r,
+      startX: event.clientX,
+      startY: event.clientY,
+      timer: setTimeout(() => fireLongPress(pointerId), LONG_PRESS_MS)
+    };
+  });
+
+  function clearPress() {
+    if (!pressState) return;
+    if (pressState.timer) clearTimeout(pressState.timer);
+    pressState = null;
+  }
+
+  gridEl.addEventListener('pointermove', (event) => {
+    if (!pressState || event.pointerId !== pressState.pointerId) return;
+    const dx = Math.abs(event.clientX - pressState.startX);
+    const dy = Math.abs(event.clientY - pressState.startY);
+    if (dx > MOVE_TOLERANCE_PX || dy > MOVE_TOLERANCE_PX) clearPress();
+  });
+  gridEl.addEventListener('pointerup', clearPress);
+  gridEl.addEventListener('pointercancel', clearPress);
+
+  function fireLongPress(pointerId) {
+    if (!pressState || pressState.pointerId !== pointerId) return;
+    const sourceRow = pressState.r;
+    pressState = null;
+    onDragStarted();
+    startRowDrag(sourceRow, pointerId);
+  }
+
+  function startRowDrag(sourceRow, pointerId) {
+    const sourceCells = gridEl.querySelectorAll(`.cell[data-r="${sourceRow}"]`);
+    sourceCells.forEach((c) => c.classList.add('cell--row-dragging'));
+
+    const cellSize =
+      parseFloat(getComputedStyle(gridEl).getPropertyValue('--cell-size')) || 38;
+    let lastTargetRow = sourceRow;
+    paintDropTarget(gridEl, lastTargetRow);
+
+    const onMove = (event) => {
+      if (event.pointerId !== pointerId) return;
+      const rect = gridEl.getBoundingClientRect();
+      const yRel = event.clientY - rect.top;
+      const newTarget = clampNumber(
+        Math.floor(yRel / cellSize),
+        0,
+        block.rows - 1
+      );
+      if (newTarget !== lastTargetRow) {
+        lastTargetRow = newTarget;
+        paintDropTarget(gridEl, lastTargetRow);
+      }
+    };
+
+    const onUp = (event) => {
+      if (event.pointerId !== pointerId) return;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      sourceCells.forEach((c) => c.classList.remove('cell--row-dragging'));
+      clearDropTarget(gridEl);
+      if (lastTargetRow !== sourceRow) {
+        onMoveRow(sourceRow, lastTargetRow);
+      }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+}
+
+function rowHasContent(block, row) {
+  for (const key of Object.keys(block.cells)) {
+    if (Number(key.split(',', 1)[0]) === row) return true;
+  }
+  return false;
+}
+
+function paintDropTarget(gridEl, row) {
+  clearDropTarget(gridEl);
+  gridEl
+    .querySelectorAll(`.cell[data-r="${row}"]`)
+    .forEach((c) => c.classList.add('cell--drop-target'));
+}
+
+function clearDropTarget(gridEl) {
+  gridEl
+    .querySelectorAll('.cell--drop-target')
+    .forEach((c) => c.classList.remove('cell--drop-target'));
+}
+
+function clampNumber(n, lo, hi) {
+  return Math.max(lo, Math.min(hi, n));
 }
 
 export { cellKey, compositeSlots };

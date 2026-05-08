@@ -498,6 +498,19 @@ h1 {
   100% { background: transparent; }
 }
 
+/* Row drag (long-press to grab a finished calculation, drag to a new row).
+   Source row glows; target row is shaded so the kid sees where it lands. */
+.cell--row-dragging {
+  background: rgba(11, 108, 242, 0.18);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.cell--drop-target {
+  background: rgba(11, 108, 242, 0.08);
+  outline: 1.5px dashed var(--accent);
+  outline-offset: -2px;
+}
+
 /* --- Composite cells (Phase 5) --- */
 
 .cell--composite {
@@ -651,38 +664,33 @@ h1 {
   align-self: stretch;
 }
 
-/* Vertical operator column (÷ × − +) — slim and stretches to align with
-   the 4-row digits/vars sections to either side. */
-.keypad__section--ops {
-  flex: 0 0 auto;
-}
+/* Each section uses flex weights proportional to its column count so a
+   key in the digits section is the same width as a key in vars, ops or
+   arrows. Vars/digits = 3 cols, arrows = 2 cols, ops = 1 col → totals 9
+   weighted units across the row. */
+.keypad__section--vars { flex: 3 1 0; min-width: 0; }
+.keypad__section--digits { flex: 3 1 0; min-width: 0; }
+.keypad__section--ops { flex: 1 1 0; min-width: 0; }
+.keypad__section--arrows { flex: 2 1 0; min-width: 0; }
 
-/* Variables / algebra section grows to claim leftover horizontal space
-   so the top row hugs the keypad's full width. */
-.keypad__section--vars { flex: 1 1 auto; min-width: 0; }
-.keypad__section--digits { flex: 1 1 auto; min-width: 0; }
-.keypad__section--arrows { flex: 1 1 auto; min-width: 0; }
-
-/* Bottom action bar: mode-toggle on the left, wide Space in the middle,
-   backspace on the right. Same shape on math and Hebrew keypads. */
+/* Bottom action bar: mode-toggle on the left, Space in the middle,
+   backspace on the right. Weighted 1:2:1 so Space stays clearly the
+   widest key while ABC/123 and ⌫ are large enough to tap easily. */
 .keypad__bottom {
   display: flex;
   flex-direction: row;
   gap: 6px;
   align-items: stretch;
 }
-.keypad__bottom .keypad__key {
-  min-height: 48px;
-  flex: 0 0 auto;
-  /* Mode-toggle and backspace sit at a sensible fixed width so the wide
-     Space key visually dominates the row. */
-  min-width: 80px;
-}
+.keypad__bottom .keypad__key { min-height: 48px; }
+.keypad__bottom .keypad__key--mode { flex: 1 1 0; min-width: 0; }
 .keypad__bottom .keypad__key--space {
-  flex: 1 1 auto;
+  flex: 2 1 0;
+  min-width: 0;
   font-size: 16px;
   font-weight: 500;
 }
+.keypad__bottom .keypad__key--edit { flex: 1 1 0; min-width: 0; }
 
 .keypad__placeholder {
   visibility: hidden;
@@ -811,6 +819,27 @@ h1 {
 /* "Var" keys (a, b, x, y) — italic to match math typography. */
 .keypad__key--var {
   font-style: italic;
+}
+
+/* a/b fraction key glyph — stacked numerator/bar/denominator that matches
+   the rendered fraction the key produces in the grid. */
+.keypad__frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  font-style: italic;
+  line-height: 1;
+  font-size: 18px;
+}
+.keypad__frac-num,
+.keypad__frac-den {
+  padding: 1px 0;
+}
+.keypad__frac-bar {
+  width: 18px;
+  height: 1.5px;
+  background: currentColor;
+  margin: 1px 0;
 }
 
 /* Composite-creating keys (FRAC, POW, SQRT, SQUARE, NROOT) — stand out
