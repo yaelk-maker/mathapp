@@ -20,6 +20,7 @@ import {
 import {
   BLOCK,
   newWorkBlock,
+  newTextBlock,
   isComposite,
   compositeSlots,
   isCompositeEmpty,
@@ -35,6 +36,7 @@ import {
   revokeWorksheetUrls,
   revokeBlobUrl
 } from './render/worksheet.js';
+import { renderTextBlock } from './render/textblock.js';
 import {
   sizeCanvas,
   renderStroke,
@@ -42,6 +44,7 @@ import {
   replayStrokes
 } from './render/strokes.js';
 import { renderKeypad, keyboardEventToCode } from './input/keypad.js';
+import { renderHebrewKeypad } from './input/hebrew-keypad.js';
 import { uploadWorksheet } from './io/import.js';
 import { attachPencilSurface } from './input/pencil.js';
 
@@ -96,6 +99,15 @@ export async function mountEditor(root, notebookId) {
   let activeWorkBlock = page.blocks.find((b) => b.type === BLOCK.WORK);
   let activeGrid = null;
 
+  // The textarea that should receive Hebrew keypad presses. Updated by the
+  // text block's focus handler. Cleared on blur (after a short delay so we
+  // can refocus it from a key press without losing the target).
+  let focusedTextarea = null;
+
+  // Keypad mode: 'math' (default) or 'hebrew'. Hebrew mode swaps in the
+  // letter keypad and routes presses into the focused textarea.
+  let keypadMode = 'math';
+
   // Drawing state
   const strokes = await listStrokesByPage(page.id);
   let pencilEnabled = false;
@@ -121,9 +133,12 @@ export async function mountEditor(root, notebookId) {
       <div class="editor__actions">
         <button class="btn btn--ghost" id="upload-photo">📷 צלם דף</button>
         <button class="btn btn--ghost" id="upload-library">🖼️ בחר תמונה</button>
+        <button class="btn btn--ghost" id="add-text">📝 תיבת טקסט</button>
+        <button class="btn btn--ghost" id="add-work">➕ אזור פתרון</button>
         <button class="btn btn--ghost" id="toggle-split">🔀 פיצול</button>
         <button class="btn btn--ghost" id="print-page">🖨️ הדפסה</button>
         <span class="editor__sep"></span>
+        <button class="btn btn--ghost" id="toggle-keyboard">🇮🇱 עברית</button>
         <button class="btn btn--ghost" id="toggle-pen">✏️ ציור</button>
         <span class="pen-tools" id="pen-tools" hidden>
           ${PEN_COLORS.map(
@@ -173,6 +188,8 @@ export async function mountEditor(root, notebookId) {
   document.getElementById('upload-library').addEventListener('click', () =>
     addWorksheet({ capture: false })
   );
+  document.getElementById('add-text').addEventListener('click', () => addTextBlock());
+  document.getElementById('add-work').addEventListener('click', () => addWorkBlock());
 
   // Split-view toggle: in split mode the worksheet sits next to the work
   // block (instead of above). Persisted in localStorage so the preference
@@ -262,8 +279,36 @@ export async function mountEditor(root, notebookId) {
 
   await renderBlocks();
 
-  const keypad = renderKeypad({ onKey: handleKey });
-  document.getElementById('keypad-host').appendChild(keypad);
+  const keypadHost = document.getElementById('keypad-host');
+
+  function mountKeypad() {
+    keypadHost.innerHTML = '';
+    if (keypadMode === 'hebrew') {
+      keypadHost.appendChild(renderHebrewKeypad({ onKey: handleHebrewKey }));
+    } else {
+      keypadHost.appendChild(renderKeypad({ onKey: handleKey }));
+    }
+  }
+
+  function setKeypadMode(mode) {
+    if (mode === keypadMode) return;
+    keypadMode = mode;
+    const btn = document.getElementById('toggle-keyboard');
+    if (btn) btn.classList.toggle('btn--active', keypadMode === 'hebrew');
+    mountKeypad();
+    requestAnimationFrame(() => resizeAndReplay());
+  }
+
+  document.getElementById('toggle-keyboard').addEventListener('click', () => {
+    setKeypadMode(keypadMode === 'hebrew' ? 'math' : 'hebrew');
+    // When switching to Hebrew, try to refocus the last text block so the
+    // first key press goes somewhere useful.
+    if (keypadMode === 'hebrew' && focusedTextarea) {
+      focusedTextarea.focus();
+    }
+  });
+
+  mountKeypad();
 
   // Set up pencil surface and replay existing strokes
   setupPencilSurface();
@@ -303,25 +348,168 @@ export async function mountEditor(root, notebookId) {
     activeGrid = null;
     activeWorkBlock = null;
     for (const block of page.blocks) {
+      let el = null;
       if (block.type === BLOCK.WORKSHEET) {
-        const el = await renderWorksheetBlock(block, {
+        el = await renderWorksheetBlock(block, {
           onDelete: (id) => removeBlock(id)
         });
-        pageHost.appendChild(el);
       } else if (block.type === BLOCK.WORK) {
         const { wrapper, grid } = renderWorkBlock(block, {
           cursor,
-          onCellTap: (r, c) => moveCursor(r, c)
+          onCellTap: (r, c) => {
+            // Tapping a cell switches focus to that work block (if there
+            // are several) and back to the math keypad.
+            if (activeWorkBlock !== block) {
+              activeWorkBlock = block;
+              activeGrid = grid;
+              cursor.r = 0; cursor.c = 0; cursor.slot = null;
+            }
+            if (keypadMode !== 'math') setKeypadMode('math');
+            moveCursor(r, c);
+          }
         });
-        pageHost.appendChild(wrapper);
+        el = wrapper;
         if (!activeWorkBlock) {
           activeWorkBlock = block;
           activeGrid = grid;
         }
+      } else if (block.type === BLOCK.TEXT) {
+        el = renderTextBlock(block, {
+          onDelete: (id) => removeBlock(id),
+          onFocus: (ta) => {
+            focusedTextarea = ta;
+            // Auto-switch to Hebrew keypad when focusing a text block —
+            // the kid will almost always want Hebrew when the cursor is
+            // in a text answer field.
+            if (keypadMode !== 'hebrew') setKeypadMode('hebrew');
+          },
+          onChange: () => queueSave()
+        });
+      }
+      if (el) {
+        attachBlockDragHandle(el, block);
+        pageHost.appendChild(el);
       }
     }
     // Allow layout to settle, then resize the canvas to match content.
     requestAnimationFrame(() => resizeAndReplay());
+  }
+
+  // Add a small drag handle button to the top-start of the block. Pointer-
+  // event-driven reorder: while dragging, we lift the block visually and
+  // show a thin blue indicator at the prospective drop position. On release
+  // we swap into page.blocks at that index. Disabled while pen mode is on
+  // so the canvas's pointer-events: auto doesn't fight the handle.
+  function attachBlockDragHandle(el, block) {
+    el.classList.add('block');
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'block__handle';
+    handle.title = 'גרור כדי לסדר מחדש';
+    handle.setAttribute('aria-label', 'גרור כדי לסדר מחדש');
+    handle.textContent = '⋮⋮';
+    // Don't let the handle steal focus from a textarea/cell.
+    handle.addEventListener('mousedown', (e) => e.preventDefault());
+    handle.addEventListener('pointerdown', (e) => {
+      if (pencilEnabled) return;
+      startBlockDrag(e, el, block, handle);
+    });
+    el.appendChild(handle);
+  }
+
+  let dragState = null;
+  function startBlockDrag(downEvent, el, block, handle) {
+    downEvent.preventDefault();
+    handle.setPointerCapture(downEvent.pointerId);
+
+    const blocksContainer = pageHost;
+    const startY = downEvent.clientY;
+    const elRect = el.getBoundingClientRect();
+
+    dragState = {
+      pointerId: downEvent.pointerId,
+      block,
+      el,
+      handle,
+      startY,
+      moved: false,
+      indicator: null
+    };
+
+    el.classList.add('block--dragging');
+
+    const onMove = (e) => {
+      if (e.pointerId !== dragState.pointerId) return;
+      const dy = e.clientY - startY;
+      if (!dragState.moved && Math.abs(dy) < 4) return;
+      dragState.moved = true;
+      el.style.transform = `translateY(${dy}px)`;
+
+      // Compute where the block would land if released here. Compare the
+      // pointer's clientY against the midpoint of each sibling block in the
+      // CURRENT order (excluding the one being dragged) and find the slot.
+      const siblings = [...blocksContainer.children].filter(
+        (n) => n !== el && n.dataset.blockId
+      );
+      let targetIndex = siblings.length;
+      for (let i = 0; i < siblings.length; i += 1) {
+        const r = siblings[i].getBoundingClientRect();
+        if (e.clientY < r.top + r.height / 2) {
+          targetIndex = i;
+          break;
+        }
+      }
+      showDropIndicator(siblings, targetIndex);
+      dragState.targetIndex = targetIndex;
+    };
+
+    const onUp = async (e) => {
+      if (e.pointerId !== dragState.pointerId) return;
+      const ds = dragState;
+      dragState = null;
+      try {
+        handle.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      el.classList.remove('block--dragging');
+      el.style.transform = '';
+      removeDropIndicator();
+
+      if (!ds.moved || ds.targetIndex == null) return;
+      // Build the new ordering by removing the dragged block, then
+      // splicing it in at targetIndex within the "others" list. The
+      // resulting array IS the new page.blocks order.
+      const others = page.blocks.filter((b) => b.id !== ds.block.id);
+      others.splice(ds.targetIndex, 0, ds.block);
+      const sameOrder = others.every((b, i) => b === page.blocks[i]);
+      if (!sameOrder) {
+        page.blocks = others;
+        await savePage(page);
+        await renderBlocks();
+      }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  function showDropIndicator(siblings, index) {
+    removeDropIndicator();
+    const indicator = document.createElement('div');
+    indicator.className = 'block-drop-indicator';
+    if (index >= siblings.length) {
+      pageHost.appendChild(indicator);
+    } else {
+      pageHost.insertBefore(indicator, siblings[index]);
+    }
+    if (dragState) dragState.indicator = indicator;
+  }
+
+  function removeDropIndicator() {
+    pageHost.querySelectorAll('.block-drop-indicator').forEach((n) => n.remove());
   }
 
   // ---------- worksheet add / remove ----------
@@ -375,6 +563,41 @@ export async function mountEditor(root, notebookId) {
       revokeBlobUrl(block.blobId);
       await deleteBlob(block.blobId);
     }
+    if (focusedTextarea && focusedTextarea.dataset.blockId === blockId) {
+      focusedTextarea = null;
+    }
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  async function addTextBlock() {
+    const text = newTextBlock();
+    page.blocks.push(text);
+    await savePage(page);
+    await renderBlocks();
+    // Focus the new textarea so the user can start typing immediately.
+    requestAnimationFrame(() => {
+      const ta = pageHost.querySelector(
+        `[data-block-id="${text.id}"] .textblock__input`
+      );
+      if (ta) ta.focus();
+    });
+  }
+
+  async function addWorkBlock() {
+    page.blocks.push(newWorkBlock());
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Move a block within the page.blocks array, then save and rerender.
+  async function reorderBlock(blockId, newIndex) {
+    const fromIndex = page.blocks.findIndex((b) => b.id === blockId);
+    if (fromIndex < 0) return;
+    const clamped = Math.max(0, Math.min(page.blocks.length - 1, newIndex));
+    if (fromIndex === clamped) return;
+    const [block] = page.blocks.splice(fromIndex, 1);
+    page.blocks.splice(clamped, 0, block);
     await savePage(page);
     await renderBlocks();
   }
@@ -511,6 +734,47 @@ export async function mountEditor(root, notebookId) {
   }
 
   // ---------- input dispatch ----------
+
+  // Hebrew keypad presses target the focused textarea. If nothing is
+  // focused, refocus the most recently used one (or the first text block on
+  // the page) so the first press doesn't silently drop.
+  function handleHebrewKey(code) {
+    let ta = focusedTextarea;
+    if (!ta || !document.body.contains(ta)) {
+      ta = pageHost.querySelector('.textblock__input');
+      if (ta) ta.focus();
+      focusedTextarea = ta;
+    }
+    if (!ta) return;
+    const { selectionStart, selectionEnd, value } = ta;
+    const start = selectionStart != null ? selectionStart : value.length;
+    const end = selectionEnd != null ? selectionEnd : value.length;
+
+    if (code === 'BACKSPACE') {
+      if (start === end && start > 0) {
+        ta.value = value.slice(0, start - 1) + value.slice(end);
+        ta.selectionStart = ta.selectionEnd = start - 1;
+      } else if (start !== end) {
+        ta.value = value.slice(0, start) + value.slice(end);
+        ta.selectionStart = ta.selectionEnd = start;
+      }
+    } else {
+      let insert;
+      if (code === 'SPACE') insert = ' ';
+      else if (code === 'NEWLINE') insert = '\n';
+      else insert = code;
+      ta.value = value.slice(0, start) + insert + value.slice(end);
+      ta.selectionStart = ta.selectionEnd = start + insert.length;
+    }
+
+    // Sync the model + autosize + persist.
+    const blockId = ta.dataset.blockId;
+    const block = page.blocks.find((b) => b.id === blockId);
+    if (block) block.content = ta.value;
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+    queueSave();
+  }
 
   function handleKey(code) {
     if (!activeWorkBlock) return;
