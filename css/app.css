@@ -121,16 +121,45 @@ h1 {
   font-size: 14px;
 }
 
+.notebook-card__action,
 .notebook-card__delete {
   background: transparent;
   border: none;
-  color: var(--danger);
-  font-size: 22px;
-  padding: 8px 12px;
+  font-size: 20px;
+  padding: 8px 10px;
   cursor: pointer;
   border-radius: 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+.notebook-card__action {
+  color: var(--accent);
+  font-size: 18px;
+}
+.notebook-card__action:active { background: rgba(11, 108, 242, 0.1); }
+.notebook-card__delete {
+  color: var(--danger);
+  font-size: 22px;
 }
 .notebook-card__delete:active { background: rgba(192, 57, 43, 0.1); }
+
+.search-input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 16px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 16px;
+  background: var(--card);
+  color: var(--fg);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(11, 108, 242, 0.15);
+}
 
 .empty-state {
   text-align: center;

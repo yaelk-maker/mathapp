@@ -64,6 +64,54 @@ export async function exportNotebooksToJSON() {
   return result;
 }
 
+// Same shape as exportNotebooksToJSON, but for a single notebook. The
+// resulting JSON imports back through importNotebooksFromJSON unchanged
+// (the importer iterates over `notebooks` regardless of count).
+export async function exportSingleNotebookToJSON(notebookId) {
+  const db = await getDB();
+  const nb = await db.get('notebooks', notebookId);
+  if (!nb) throw new Error('Notebook not found: ' + notebookId);
+  const allPages = await db.getAllFromIndex('pages', 'byNotebook', notebookId);
+  const pages = allPages.sort((a, b) => a.index - b.index);
+
+  const referencedBlobIds = new Set();
+  const richPages = [];
+  for (const p of pages) {
+    const strokes = (await db.getAllFromIndex('strokes', 'byPage', p.id)).sort(
+      (a, b) => a.createdAt - b.createdAt
+    );
+    richPages.push({ ...p, strokes });
+    for (const block of p.blocks || []) {
+      if (block.type === 'worksheet' && block.blobId) referencedBlobIds.add(block.blobId);
+    }
+  }
+
+  const blobs = {};
+  for (const blobId of referencedBlobIds) {
+    const record = await db.get('blobs', blobId);
+    if (!record) continue;
+    blobs[blobId] = {
+      type: record.blob.type || 'image/png',
+      data: await blobToDataURL(record.blob)
+    };
+  }
+
+  return {
+    ...FORMAT,
+    exportedAt: new Date().toISOString(),
+    notebooks: [
+      {
+        id: nb.id,
+        name: nb.name,
+        createdAt: nb.createdAt,
+        updatedAt: nb.updatedAt,
+        pages: richPages
+      }
+    ],
+    blobs
+  };
+}
+
 export async function downloadJSON(data, filename = 'mathapp-backup.json') {
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: 'application/json' });

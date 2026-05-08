@@ -13,6 +13,7 @@ const LAYOUT = [
     null,
     { code: '+', label: '+', kind: 'op' },
     { code: '−', label: '−', kind: 'op' },
+    { code: '%', label: '%', kind: 'op' },
     null,
     { code: '(', label: '(', kind: 'op' },
     { code: ')', label: ')', kind: 'op' },
@@ -112,6 +113,7 @@ export function keyboardEventToCode(event) {
     case ',': return '.';
     case '(': return '(';
     case ')': return ')';
+    case '%': return '%';
     case '<': return '<';
     case '>': return '>';
     case 'Backspace':

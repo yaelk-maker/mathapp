@@ -47,10 +47,20 @@ import { attachPencilSurface } from './input/pencil.js';
 
 const CHAR_KEYS = new Set([
   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-  '+', '−', '×', '÷', '=', '.', '(', ')',
+  '+', '−', '×', '÷', '=', '.', '(', ')', '%',
   'x', 'y', 'a', 'b',
   '<', '>', '≤', '≥'
 ]);
+
+// Inside a fraction slot we can't open a nested composite (slots are plain
+// strings), but the kid still wants to write things like "x²" or "√2" in a
+// numerator. Map POW/SQRT presses to inline unicode marks so they appear in
+// the slot text. POW cycles ²→³→⁴ when pressed repeatedly so multiple
+// powers are reachable without a dedicated key.
+const SUPERSCRIPT_DIGITS = ['²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+const SUPERSCRIPT_NEXT = new Map(
+  SUPERSCRIPT_DIGITS.map((s, i) => [s, SUPERSCRIPT_DIGITS[(i + 1) % SUPERSCRIPT_DIGITS.length]])
+);
 
 const COMPOSITE_KEYS = {
   FRAC: () => newFractionCell(),
@@ -592,6 +602,34 @@ export async function mountEditor(root, notebookId) {
     queueSave();
   }
 
+  // POW pressed inside a slot: cycle the trailing superscript digit (²→³→⁴…)
+  // if present, otherwise append ². The kid taps once for square, twice for
+  // cube, etc., without us needing a separate key per power.
+  function appendSuperscriptToSlot(cell, r, c, slot) {
+    const current = cell[slot] || '';
+    const last = current.slice(-1);
+    if (SUPERSCRIPT_NEXT.has(last)) {
+      const next = SUPERSCRIPT_NEXT.get(last);
+      return replaceSlotTail(cell, r, c, slot, current.slice(0, -1) + next);
+    }
+    return appendCharToSlot(cell, r, c, slot, '²');
+  }
+
+  // Append a literal char to a slot — same width-expansion guard as
+  // appendToSlot. Kept separate from insertChar's typing path so the kid
+  // can't end up in the "cursor.slot but cell isn't composite" branch.
+  function appendCharToSlot(cell, r, c, slot, ch) {
+    return appendToSlot(cell, r, c, slot, ch);
+  }
+
+  // For superscript cycling: replace the slot value entirely (length stays
+  // the same so we never need to re-check width or rerender the grid).
+  function replaceSlotTail(cell, r, c, slot, newValue) {
+    cell[slot] = newValue;
+    repaintCell(r, c);
+    queueSave();
+  }
+
   // Briefly flash a cell red to indicate "no room — input refused".
   function flashRefuse(r, c) {
     if (!activeGrid) return;
@@ -605,7 +643,20 @@ export async function mountEditor(root, notebookId) {
     const r = cursor.r;
     const c = cursor.c;
     if (cursor.slot) {
-      // Composites cannot be nested in this version. Exit current slot first.
+      // Composites can't be nested into a slot's string model, but POW and
+      // SQRT are common enough inside fractions that we handle them inline:
+      // POW appends/cycles a unicode superscript digit, SQRT prepends a √.
+      // FRAC inside a slot still falls through to "exit and create new".
+      const cell = getCellAt(r, c);
+      if (isComposite(cell)) {
+        if (template.type === 'pow') {
+          return appendSuperscriptToSlot(cell, r, c, cursor.slot);
+        }
+        if (template.type === 'sqrt') {
+          return appendCharToSlot(cell, r, c, cursor.slot, '√');
+        }
+      }
+      // FRAC (or any unhandled composite): exit and create new outside.
       exitComposite(1);
       return insertComposite(template);
     }
