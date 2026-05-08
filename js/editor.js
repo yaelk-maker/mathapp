@@ -363,6 +363,7 @@ export async function mountEditor(root, notebookId) {
             if (keypadMode !== 'math') setKeypadMode('math');
             moveCursor(r, c);
           },
+          onMoveRow: (fromRow, toRow) => moveRowAndSave(block, fromRow, toRow),
           onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
         });
         el = wrapper;
@@ -719,6 +720,31 @@ export async function mountEditor(root, notebookId) {
 
   async function addWorkBlock() {
     page.blocks.push(newWorkBlock());
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Long-press row drag drop target — re-key every cell in `block.cells`
+  // so row `fromRow` lands at `toRow` and the rows between shift to fill
+  // the gap (insert semantics, not swap). Active cursor follows the
+  // moving row so the kid keeps editing where they were.
+  async function moveRowAndSave(block, fromRow, toRow) {
+    if (fromRow === toRow) return;
+    const newCells = {};
+    for (const [key, cell] of Object.entries(block.cells)) {
+      const [r, c] = key.split(',').map(Number);
+      let newR = r;
+      if (r === fromRow) newR = toRow;
+      else if (fromRow < toRow && r > fromRow && r <= toRow) newR = r - 1;
+      else if (fromRow > toRow && r >= toRow && r < fromRow) newR = r + 1;
+      newCells[`${newR},${c}`] = cell;
+    }
+    block.cells = newCells;
+    if (activeWorkBlock === block) {
+      if (cursor.r === fromRow) cursor.r = toRow;
+      else if (fromRow < toRow && cursor.r > fromRow && cursor.r <= toRow) cursor.r -= 1;
+      else if (fromRow > toRow && cursor.r >= toRow && cursor.r < fromRow) cursor.r += 1;
+    }
     await savePage(page);
     await renderBlocks();
   }
@@ -1415,6 +1441,8 @@ export async function mountEditor(root, notebookId) {
     const { wrapper: newWrapper, grid: newGrid } = renderWorkBlock(activeWorkBlock, {
       cursor,
       onCellTap: (r, c) => moveCursor(r, c),
+      onMoveRow: (fromRow, toRow) =>
+        moveRowAndSave(activeWorkBlock, fromRow, toRow),
       onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
     });
     // Reattach drag + resize handles. Without this they vanish whenever a
