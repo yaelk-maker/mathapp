@@ -20,6 +20,7 @@ import {
 import {
   BLOCK,
   newWorkBlock,
+  newTextBlock,
   isComposite,
   compositeSlots,
   isCompositeEmpty,
@@ -35,6 +36,7 @@ import {
   revokeWorksheetUrls,
   revokeBlobUrl
 } from './render/worksheet.js';
+import { renderTextBlock } from './render/textblock.js';
 import {
   sizeCanvas,
   renderStroke,
@@ -42,6 +44,7 @@ import {
   replayStrokes
 } from './render/strokes.js';
 import { renderKeypad, keyboardEventToCode } from './input/keypad.js';
+import { renderHebrewKeypad } from './input/hebrew-keypad.js';
 import { uploadWorksheet } from './io/import.js';
 import { attachPencilSurface } from './input/pencil.js';
 
@@ -96,6 +99,15 @@ export async function mountEditor(root, notebookId) {
   let activeWorkBlock = page.blocks.find((b) => b.type === BLOCK.WORK);
   let activeGrid = null;
 
+  // The textarea that should receive Hebrew keypad presses. Updated by the
+  // text block's focus handler. Cleared on blur (after a short delay so we
+  // can refocus it from a key press without losing the target).
+  let focusedTextarea = null;
+
+  // Keypad mode: 'math' (default) or 'hebrew'. Hebrew mode swaps in the
+  // letter keypad and routes presses into the focused textarea.
+  let keypadMode = 'math';
+
   // Drawing state
   const strokes = await listStrokesByPage(page.id);
   let pencilEnabled = false;
@@ -107,6 +119,11 @@ export async function mountEditor(root, notebookId) {
   let detachPencil = null;
   const liveStrokes = new Map(); // strokeId -> stroke being drawn
   const liveDrawnPointCount = new Map(); // strokeId -> last drawn index
+  // Block offset captured at stroke start. The block can't move during a
+  // single stroke (the user is drawing on it), so caching at start lets us
+  // translate incoming points to block-relative coords without re-measuring
+  // the DOM on every pointermove.
+  const liveStrokeOffsets = new Map(); // strokeId -> { x, y }
   // In-flight stroke save promises. Cleanup must await these so the kid never
   // loses a stroke by tapping "back" right after lifting the Pencil.
   const pendingStrokeSaves = new Set();
@@ -121,9 +138,12 @@ export async function mountEditor(root, notebookId) {
       <div class="editor__actions">
         <button class="btn btn--ghost" id="upload-photo">📷 צלם דף</button>
         <button class="btn btn--ghost" id="upload-library">🖼️ בחר תמונה</button>
+        <button class="btn btn--ghost" id="add-text">📝 תיבת טקסט</button>
+        <button class="btn btn--ghost" id="add-work">➕ אזור פתרון</button>
         <button class="btn btn--ghost" id="toggle-split">🔀 פיצול</button>
         <button class="btn btn--ghost" id="print-page">🖨️ הדפסה</button>
         <span class="editor__sep"></span>
+        <button class="btn btn--ghost" id="toggle-keyboard">🇮🇱 עברית</button>
         <button class="btn btn--ghost" id="toggle-pen">✏️ ציור</button>
         <span class="pen-tools" id="pen-tools" hidden>
           ${PEN_COLORS.map(
@@ -173,6 +193,8 @@ export async function mountEditor(root, notebookId) {
   document.getElementById('upload-library').addEventListener('click', () =>
     addWorksheet({ capture: false })
   );
+  document.getElementById('add-text').addEventListener('click', () => addTextBlock());
+  document.getElementById('add-work').addEventListener('click', () => addWorkBlock());
 
   // Split-view toggle: in split mode the worksheet sits next to the work
   // block (instead of above). Persisted in localStorage so the preference
@@ -262,8 +284,36 @@ export async function mountEditor(root, notebookId) {
 
   await renderBlocks();
 
-  const keypad = renderKeypad({ onKey: handleKey });
-  document.getElementById('keypad-host').appendChild(keypad);
+  const keypadHost = document.getElementById('keypad-host');
+
+  function mountKeypad() {
+    keypadHost.innerHTML = '';
+    if (keypadMode === 'hebrew') {
+      keypadHost.appendChild(renderHebrewKeypad({ onKey: handleHebrewKey }));
+    } else {
+      keypadHost.appendChild(renderKeypad({ onKey: handleKey }));
+    }
+  }
+
+  function setKeypadMode(mode) {
+    if (mode === keypadMode) return;
+    keypadMode = mode;
+    const btn = document.getElementById('toggle-keyboard');
+    if (btn) btn.classList.toggle('btn--active', keypadMode === 'hebrew');
+    mountKeypad();
+    requestAnimationFrame(() => resizeAndReplay());
+  }
+
+  document.getElementById('toggle-keyboard').addEventListener('click', () => {
+    setKeypadMode(keypadMode === 'hebrew' ? 'math' : 'hebrew');
+    // When switching to Hebrew, try to refocus the last text block so the
+    // first key press goes somewhere useful.
+    if (keypadMode === 'hebrew' && focusedTextarea) {
+      focusedTextarea.focus();
+    }
+  });
+
+  mountKeypad();
 
   // Set up pencil surface and replay existing strokes
   setupPencilSurface();
@@ -303,25 +353,168 @@ export async function mountEditor(root, notebookId) {
     activeGrid = null;
     activeWorkBlock = null;
     for (const block of page.blocks) {
+      let el = null;
       if (block.type === BLOCK.WORKSHEET) {
-        const el = await renderWorksheetBlock(block, {
+        el = await renderWorksheetBlock(block, {
           onDelete: (id) => removeBlock(id)
         });
-        pageHost.appendChild(el);
       } else if (block.type === BLOCK.WORK) {
         const { wrapper, grid } = renderWorkBlock(block, {
           cursor,
-          onCellTap: (r, c) => moveCursor(r, c)
+          onCellTap: (r, c) => {
+            // Tapping a cell switches focus to that work block (if there
+            // are several) and back to the math keypad.
+            if (activeWorkBlock !== block) {
+              activeWorkBlock = block;
+              activeGrid = grid;
+              cursor.r = 0; cursor.c = 0; cursor.slot = null;
+            }
+            if (keypadMode !== 'math') setKeypadMode('math');
+            moveCursor(r, c);
+          }
         });
-        pageHost.appendChild(wrapper);
+        el = wrapper;
         if (!activeWorkBlock) {
           activeWorkBlock = block;
           activeGrid = grid;
         }
+      } else if (block.type === BLOCK.TEXT) {
+        el = renderTextBlock(block, {
+          onDelete: (id) => removeBlock(id),
+          onFocus: (ta) => {
+            focusedTextarea = ta;
+            // Auto-switch to Hebrew keypad when focusing a text block —
+            // the kid will almost always want Hebrew when the cursor is
+            // in a text answer field.
+            if (keypadMode !== 'hebrew') setKeypadMode('hebrew');
+          },
+          onChange: () => queueSave()
+        });
+      }
+      if (el) {
+        attachBlockDragHandle(el, block);
+        pageHost.appendChild(el);
       }
     }
     // Allow layout to settle, then resize the canvas to match content.
     requestAnimationFrame(() => resizeAndReplay());
+  }
+
+  // Add a small drag handle button to the top-start of the block. Pointer-
+  // event-driven reorder: while dragging, we lift the block visually and
+  // show a thin blue indicator at the prospective drop position. On release
+  // we swap into page.blocks at that index. Disabled while pen mode is on
+  // so the canvas's pointer-events: auto doesn't fight the handle.
+  function attachBlockDragHandle(el, block) {
+    el.classList.add('block');
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'block__handle';
+    handle.title = 'גרור כדי לסדר מחדש';
+    handle.setAttribute('aria-label', 'גרור כדי לסדר מחדש');
+    handle.textContent = '⋮⋮';
+    // Don't let the handle steal focus from a textarea/cell.
+    handle.addEventListener('mousedown', (e) => e.preventDefault());
+    handle.addEventListener('pointerdown', (e) => {
+      if (pencilEnabled) return;
+      startBlockDrag(e, el, block, handle);
+    });
+    el.appendChild(handle);
+  }
+
+  let dragState = null;
+  function startBlockDrag(downEvent, el, block, handle) {
+    downEvent.preventDefault();
+    handle.setPointerCapture(downEvent.pointerId);
+
+    const blocksContainer = pageHost;
+    const startY = downEvent.clientY;
+    const elRect = el.getBoundingClientRect();
+
+    dragState = {
+      pointerId: downEvent.pointerId,
+      block,
+      el,
+      handle,
+      startY,
+      moved: false,
+      indicator: null
+    };
+
+    el.classList.add('block--dragging');
+
+    const onMove = (e) => {
+      if (e.pointerId !== dragState.pointerId) return;
+      const dy = e.clientY - startY;
+      if (!dragState.moved && Math.abs(dy) < 4) return;
+      dragState.moved = true;
+      el.style.transform = `translateY(${dy}px)`;
+
+      // Compute where the block would land if released here. Compare the
+      // pointer's clientY against the midpoint of each sibling block in the
+      // CURRENT order (excluding the one being dragged) and find the slot.
+      const siblings = [...blocksContainer.children].filter(
+        (n) => n !== el && n.dataset.blockId
+      );
+      let targetIndex = siblings.length;
+      for (let i = 0; i < siblings.length; i += 1) {
+        const r = siblings[i].getBoundingClientRect();
+        if (e.clientY < r.top + r.height / 2) {
+          targetIndex = i;
+          break;
+        }
+      }
+      showDropIndicator(siblings, targetIndex);
+      dragState.targetIndex = targetIndex;
+    };
+
+    const onUp = async (e) => {
+      if (e.pointerId !== dragState.pointerId) return;
+      const ds = dragState;
+      dragState = null;
+      try {
+        handle.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      el.classList.remove('block--dragging');
+      el.style.transform = '';
+      removeDropIndicator();
+
+      if (!ds.moved || ds.targetIndex == null) return;
+      // Build the new ordering by removing the dragged block, then
+      // splicing it in at targetIndex within the "others" list. The
+      // resulting array IS the new page.blocks order.
+      const others = page.blocks.filter((b) => b.id !== ds.block.id);
+      others.splice(ds.targetIndex, 0, ds.block);
+      const sameOrder = others.every((b, i) => b === page.blocks[i]);
+      if (!sameOrder) {
+        page.blocks = others;
+        await savePage(page);
+        await renderBlocks();
+      }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  function showDropIndicator(siblings, index) {
+    removeDropIndicator();
+    const indicator = document.createElement('div');
+    indicator.className = 'block-drop-indicator';
+    if (index >= siblings.length) {
+      pageHost.appendChild(indicator);
+    } else {
+      pageHost.insertBefore(indicator, siblings[index]);
+    }
+    if (dragState) dragState.indicator = indicator;
+  }
+
+  function removeDropIndicator() {
+    pageHost.querySelectorAll('.block-drop-indicator').forEach((n) => n.remove());
   }
 
   // ---------- worksheet add / remove ----------
@@ -341,32 +534,36 @@ export async function mountEditor(root, notebookId) {
     if (!block) return;
     if (!window.confirm('להסיר את הדף הזה? המשבצות שלמטה יישמרו.')) return;
 
-    // For worksheet blocks: also delete any pen strokes that were drawn on
-    // top of it. Without this, the strokes would float in empty space after
-    // the image is gone. Strokes are page-scoped; we identify the ones to
-    // delete by which fall within the worksheet's vertical extent on the
-    // canvas (canvas coords = pageContent-relative pixels, same coord
-    // system stroke points are stored in).
-    if (block.type === BLOCK.WORKSHEET) {
+    // Delete any strokes that belong to this block. Strokes anchored to the
+    // block by id (the modern path) are removed directly. Legacy unanchored
+    // strokes are matched by spatial overlap with the block's vertical
+    // extent — same fallback as before, kept so old notebooks still
+    // self-clean when the user removes a block.
+    {
       const figure = pageHost.querySelector(`[data-block-id="${blockId}"]`);
+      let yTop = -Infinity;
+      let yBottom = -Infinity;
       if (figure && pageContent) {
         const figRect = figure.getBoundingClientRect();
         const contentRect = pageContent.getBoundingClientRect();
-        const yTop = figRect.top - contentRect.top;
-        const yBottom = figRect.bottom - contentRect.top;
-        // Wait for any in-flight saves so we don't race with stroke writes.
-        await Promise.allSettled([...pendingStrokeSaves]);
-        const toDelete = strokes.filter((s) =>
-          (s.points || []).some((p) => p.y >= yTop && p.y <= yBottom)
-        );
-        for (const stroke of toDelete) {
-          try { await deleteStrokeById(stroke.id); } catch (_) {}
+        yTop = figRect.top - contentRect.top;
+        yBottom = figRect.bottom - contentRect.top;
+      }
+      // Wait for any in-flight saves so we don't race with stroke writes.
+      await Promise.allSettled([...pendingStrokeSaves]);
+      const toDelete = strokes.filter((s) => {
+        if (s.blockId === blockId) return true;
+        if (!s.blockId && yTop !== -Infinity) {
+          return (s.points || []).some((p) => p.y >= yTop && p.y <= yBottom);
         }
-        // Drop deleted strokes from in-memory array.
-        const deletedIds = new Set(toDelete.map((s) => s.id));
-        for (let i = strokes.length - 1; i >= 0; i -= 1) {
-          if (deletedIds.has(strokes[i].id)) strokes.splice(i, 1);
-        }
+        return false;
+      });
+      for (const stroke of toDelete) {
+        try { await deleteStrokeById(stroke.id); } catch (_) {}
+      }
+      const deletedIds = new Set(toDelete.map((s) => s.id));
+      for (let i = strokes.length - 1; i >= 0; i -= 1) {
+        if (deletedIds.has(strokes[i].id)) strokes.splice(i, 1);
       }
     }
 
@@ -375,11 +572,100 @@ export async function mountEditor(root, notebookId) {
       revokeBlobUrl(block.blobId);
       await deleteBlob(block.blobId);
     }
+    if (focusedTextarea && focusedTextarea.dataset.blockId === blockId) {
+      focusedTextarea = null;
+    }
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  async function addTextBlock() {
+    const text = newTextBlock();
+    page.blocks.push(text);
+    await savePage(page);
+    await renderBlocks();
+    // Focus the new textarea so the user can start typing immediately.
+    requestAnimationFrame(() => {
+      const ta = pageHost.querySelector(
+        `[data-block-id="${text.id}"] .textblock__input`
+      );
+      if (ta) ta.focus();
+    });
+  }
+
+  async function addWorkBlock() {
+    page.blocks.push(newWorkBlock());
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Move a block within the page.blocks array, then save and rerender.
+  async function reorderBlock(blockId, newIndex) {
+    const fromIndex = page.blocks.findIndex((b) => b.id === blockId);
+    if (fromIndex < 0) return;
+    const clamped = Math.max(0, Math.min(page.blocks.length - 1, newIndex));
+    if (fromIndex === clamped) return;
+    const [block] = page.blocks.splice(fromIndex, 1);
+    page.blocks.splice(clamped, 0, block);
     await savePage(page);
     await renderBlocks();
   }
 
   // ---------- pencil drawing ----------
+
+  // Translate a canvas-relative point into a block-relative one by
+  // subtracting the block's top-left offset. Pressure (p) and timestamp (t)
+  // pass through unchanged.
+  function relativizePoint(point, offset) {
+    return {
+      ...point,
+      x: point.x - (offset?.x || 0),
+      y: point.y - (offset?.y || 0)
+    };
+  }
+
+  // Find which rendered block contains a given canvas-relative point.
+  // Returns { id, offset } or null when the point falls in a gap (above the
+  // first block, between blocks, or below the last). Such strokes are saved
+  // as page-anchored.
+  function findBlockAtPoint(point) {
+    if (!pageHost || !pageContent) return null;
+    const contentRect = pageContent.getBoundingClientRect();
+    for (const el of pageHost.children) {
+      if (!el.dataset || !el.dataset.blockId) continue;
+      const rect = el.getBoundingClientRect();
+      const top = rect.top - contentRect.top;
+      const bottom = rect.bottom - contentRect.top;
+      if (point.y >= top && point.y <= bottom) {
+        return {
+          id: el.dataset.blockId,
+          offset: { x: rect.left - contentRect.left, y: top }
+        };
+      }
+    }
+    return null;
+  }
+
+  // Read the current top-left of a block within canvas coords. Returns null
+  // when the block is no longer rendered (caller decides what to do —
+  // replay treats null as "skip orphan stroke").
+  function getBlockOffset(blockId) {
+    if (!blockId) return null;
+    const el = pageHost && pageHost.querySelector(`[data-block-id="${blockId}"]`);
+    if (!el || !pageContent) return null;
+    const rect = el.getBoundingClientRect();
+    const contentRect = pageContent.getBoundingClientRect();
+    return { x: rect.left - contentRect.left, y: rect.top - contentRect.top };
+  }
+
+  // Used by replayStrokes — translates a stored stroke into its current
+  // canvas position. Legacy unanchored strokes return null (render in place);
+  // strokes whose block has been removed return false (skip rendering).
+  function offsetForStroke(stroke) {
+    if (!stroke.blockId) return null;
+    const off = getBlockOffset(stroke.blockId);
+    return off || false;
+  }
 
   function setupPencilSurface() {
     detachPencilIfAny();
@@ -398,31 +684,42 @@ export async function mountEditor(root, notebookId) {
         const id = `stroke_${Date.now().toString(36)}_${Math.random()
           .toString(36)
           .slice(2, 6)}`;
+        // Anchor the stroke to whichever block contains its first point.
+        // Points are then stored block-relative so the stroke moves with
+        // the block when it's reordered. If the start falls in the gap
+        // between blocks, the stroke is page-anchored (blockId = null).
+        const found = findBlockAtPoint(point);
+        const blockId = found ? found.id : null;
+        const blockOffset = found ? found.offset : { x: 0, y: 0 };
+        liveStrokeOffsets.set(id, blockOffset);
+        const relPoint = relativizePoint(point, blockOffset);
         const stroke = {
           id,
           pageId: page.id,
+          blockId,
           color,
           width,
           eraser,
-          points: [point],
+          points: [relPoint],
           createdAt: Date.now()
         };
         liveStrokes.set(id, stroke);
         liveDrawnPointCount.set(id, 0);
         strokes.push(stroke);
-        // Render the initial dot
+        // Render the initial dot translated by the cached block offset.
         const dpr = window.devicePixelRatio || 1;
-        renderStroke(ctx, stroke, dpr);
+        renderStroke(ctx, stroke, dpr, blockOffset);
         liveDrawnPointCount.set(id, 1);
         return id;
       },
       onStrokePoint: (id, point) => {
         const stroke = liveStrokes.get(id);
         if (!stroke) return;
-        stroke.points.push(point);
+        const blockOffset = liveStrokeOffsets.get(id) || { x: 0, y: 0 };
+        stroke.points.push(relativizePoint(point, blockOffset));
         const from = liveDrawnPointCount.get(id) || 0;
         const dpr = window.devicePixelRatio || 1;
-        renderStrokeIncremental(ctx, stroke, from, dpr);
+        renderStrokeIncremental(ctx, stroke, from, dpr, blockOffset);
         liveDrawnPointCount.set(id, stroke.points.length);
       },
       onStrokeEnd: (id) => {
@@ -430,6 +727,7 @@ export async function mountEditor(root, notebookId) {
         if (!stroke) return;
         liveStrokes.delete(id);
         liveDrawnPointCount.delete(id);
+        liveStrokeOffsets.delete(id);
         const savePromise = addStroke(stroke).catch((err) => {
           console.error('Failed to save stroke:', err);
         });
@@ -471,7 +769,7 @@ export async function mountEditor(root, notebookId) {
     // Size against the content wrapper (whose size is driven by the blocks).
     // The canvas lives inside the scrollable page so it scrolls with content.
     sizeCanvas(canvas, pageContent);
-    replayStrokes(canvas, strokes);
+    replayStrokes(canvas, strokes, offsetForStroke);
     canvas.classList.toggle('pencil-canvas--active', pencilEnabled);
   }
 
@@ -486,7 +784,7 @@ export async function mountEditor(root, notebookId) {
     } catch (err) {
       console.error('Undo delete failed:', err);
     }
-    replayStrokes(canvas, strokes);
+    replayStrokes(canvas, strokes, offsetForStroke);
   }
 
   async function clearAllStrokes() {
@@ -507,10 +805,51 @@ export async function mountEditor(root, notebookId) {
     for (let i = strokes.length - 1; i >= 0; i -= 1) {
       if (idSet.has(strokes[i].id)) strokes.splice(i, 1);
     }
-    replayStrokes(canvas, strokes);
+    replayStrokes(canvas, strokes, offsetForStroke);
   }
 
   // ---------- input dispatch ----------
+
+  // Hebrew keypad presses target the focused textarea. If nothing is
+  // focused, refocus the most recently used one (or the first text block on
+  // the page) so the first press doesn't silently drop.
+  function handleHebrewKey(code) {
+    let ta = focusedTextarea;
+    if (!ta || !document.body.contains(ta)) {
+      ta = pageHost.querySelector('.textblock__input');
+      if (ta) ta.focus();
+      focusedTextarea = ta;
+    }
+    if (!ta) return;
+    const { selectionStart, selectionEnd, value } = ta;
+    const start = selectionStart != null ? selectionStart : value.length;
+    const end = selectionEnd != null ? selectionEnd : value.length;
+
+    if (code === 'BACKSPACE') {
+      if (start === end && start > 0) {
+        ta.value = value.slice(0, start - 1) + value.slice(end);
+        ta.selectionStart = ta.selectionEnd = start - 1;
+      } else if (start !== end) {
+        ta.value = value.slice(0, start) + value.slice(end);
+        ta.selectionStart = ta.selectionEnd = start;
+      }
+    } else {
+      let insert;
+      if (code === 'SPACE') insert = ' ';
+      else if (code === 'NEWLINE') insert = '\n';
+      else insert = code;
+      ta.value = value.slice(0, start) + insert + value.slice(end);
+      ta.selectionStart = ta.selectionEnd = start + insert.length;
+    }
+
+    // Sync the model + autosize + persist.
+    const blockId = ta.dataset.blockId;
+    const block = page.blocks.find((b) => b.id === blockId);
+    if (block) block.content = ta.value;
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+    queueSave();
+  }
 
   function handleKey(code) {
     if (!activeWorkBlock) return;

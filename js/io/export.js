@@ -178,7 +178,13 @@ export async function importNotebooksFromJSON(json) {
     for (const page of nb.pages || []) {
       const newPageId = uid('pg');
       const newBlocks = [];
+      // Old block id -> new block id, so stroke.blockId references can be
+      // rewritten below. Without this, restored strokes would be orphans
+      // (their anchor block has a fresh id) and be skipped on render.
+      const blockIdMap = new Map();
       for (const block of page.blocks || []) {
+        const newBlockId = uid('b');
+        blockIdMap.set(block.id, newBlockId);
         if (block.type === 'worksheet' && block.blobId) {
           let newBlobId = blobIdMap.get(block.blobId);
           if (!newBlobId) {
@@ -190,9 +196,9 @@ export async function importNotebooksFromJSON(json) {
               blobIdMap.set(block.blobId, newBlobId);
             }
           }
-          newBlocks.push({ ...block, id: uid('b'), blobId: newBlobId });
+          newBlocks.push({ ...block, id: newBlockId, blobId: newBlobId });
         } else {
-          newBlocks.push({ ...block, id: uid('b') });
+          newBlocks.push({ ...block, id: newBlockId });
         }
       }
       await db.put('pages', {
@@ -203,10 +209,14 @@ export async function importNotebooksFromJSON(json) {
         updatedAt: Date.now()
       });
       for (const stroke of page.strokes || []) {
+        const remappedBlockId = stroke.blockId
+          ? blockIdMap.get(stroke.blockId) || null
+          : null;
         await db.put('strokes', {
           ...stroke,
           id: uid('stroke'),
-          pageId: newPageId
+          pageId: newPageId,
+          blockId: remappedBlockId
         });
       }
     }
