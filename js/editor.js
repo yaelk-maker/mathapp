@@ -427,15 +427,27 @@ export async function mountEditor(root, notebookId) {
   function insertChar(ch) {
     const r = cursor.r;
     const c = cursor.c;
+    const cell = getCellAt(r, c);
 
     if (cursor.slot) {
-      // Append into a composite slot.
-      const cell = getCellAt(r, c);
       if (!isComposite(cell)) {
-        // Defensive: stray slot state — clear it.
+        // Stray slot state — clear and fall through.
         cursor.slot = null;
       } else {
         cell[cursor.slot] = (cell[cursor.slot] || '') + ch;
+        repaintCell(r, c);
+        queueSave();
+        return;
+      }
+    }
+
+    // Defensive: cursor without slot but landed on a composite cell.
+    // Enter the first slot rather than overwriting the composite.
+    if (isComposite(cell)) {
+      const firstSlot = compositeSlots(cell)[0];
+      if (firstSlot) {
+        cursor.slot = firstSlot;
+        cell[firstSlot] = (cell[firstSlot] || '') + ch;
         repaintCell(r, c);
         queueSave();
         return;
@@ -458,19 +470,30 @@ export async function mountEditor(root, notebookId) {
     }
 
     // Special UX for exponents: when typed right after an atom, "promote"
-    // that previous atom into the base of a new pow cell. Lets the kid type
-    // x then "x²" naturally instead of having to enter the base manually.
-    if (template.type === 'pow' && c > 0) {
-      const prev = getCellAt(r, c - 1);
-      if (prev && prev.ch != null) {
-        const promoted = { type: 'pow', base: prev.ch, exp: '' };
-        activeWorkBlock.cells[`${r},${c - 1}`] = promoted;
-        // Repaint the now-pow cell at (r, c-1)
-        updateCell(activeGrid, activeWorkBlock, r, c - 1);
-        // Move cursor onto the promoted cell, into the exp slot.
-        moveCursorTo(r, c - 1, 'exp');
+    // that atom into the base of a new pow cell. Two cases:
+    //  - cursor is on an empty cell with an atom immediately to its left
+    //    (the typical "type x, then xⁿ" flow)
+    //  - cursor sits ON an atom (user navigated back onto it)
+    if (template.type === 'pow') {
+      const here = getCellAt(r, c);
+      if (here && here.ch != null) {
+        const promoted = { type: 'pow', base: here.ch, exp: '' };
+        activeWorkBlock.cells[`${r},${c}`] = promoted;
+        updateCell(activeGrid, activeWorkBlock, r, c);
+        moveCursorTo(r, c, 'exp');
         queueSave();
         return;
+      }
+      if (c > 0) {
+        const prev = getCellAt(r, c - 1);
+        if (prev && prev.ch != null) {
+          const promoted = { type: 'pow', base: prev.ch, exp: '' };
+          activeWorkBlock.cells[`${r},${c - 1}`] = promoted;
+          updateCell(activeGrid, activeWorkBlock, r, c - 1);
+          moveCursorTo(r, c - 1, 'exp');
+          queueSave();
+          return;
+        }
       }
     }
 
@@ -549,6 +572,8 @@ export async function mountEditor(root, notebookId) {
   function arrowHorizontal(dir) {
     if (cursor.slot) {
       // Inside a composite slot, ←/→ exit the composite to that side.
+      // autoEnterSlot:false means we don't immediately re-enter the next
+      // composite — the user is trying to leave the current one.
       exitComposite(dir);
       return;
     }
@@ -560,39 +585,27 @@ export async function mountEditor(root, notebookId) {
       const cell = getCellAt(cursor.r, cursor.c);
       if (!isComposite(cell)) {
         cursor.slot = null;
-        moveCursor(cursor.r + dir, cursor.c);
+        moveCursor(cursor.r + dir, cursor.c, { autoEnterSlot: false });
         return;
       }
       const slots = compositeSlots(cell);
       const idx = slots.indexOf(cursor.slot);
-      // For fractions: ↑ in num exits up, ↓ in den exits down,
-      // ↑ in den moves to num, ↓ in num moves to den.
-      // For exponents: ↑ in base moves to exp; ↓ in exp moves to base;
-      // ↑ in exp / ↓ in base exit.
       const lastIdx = slots.length - 1;
-      let nextIdx = idx;
-      if (cell.type === 'fraction' || cell.type === 'pow') {
-        if (dir < 0) {
-          // up: prefer earlier slot, else exit
-          nextIdx = idx > 0 ? idx - 1 : -1;
-          if (cell.type === 'pow') {
-            // pow display: exp is "above" base, so up = base->exp, exp->exit
-            nextIdx = idx === 0 ? 1 : -1;
-          }
-        } else {
-          // down
-          nextIdx = idx < lastIdx ? idx + 1 : -1;
-          if (cell.type === 'pow') {
-            nextIdx = idx === 1 ? 0 : -1;
-          }
-        }
-      } else {
-        // single-slot composites (sqrt, abs): up/down exit
-        nextIdx = -1;
+      let nextIdx = -1;
+      if (cell.type === 'fraction') {
+        // num is "above" den in display: ↑ in den → num; ↓ in num → den.
+        if (dir < 0) nextIdx = idx > 0 ? idx - 1 : -1;
+        else nextIdx = idx < lastIdx ? idx + 1 : -1;
+      } else if (cell.type === 'pow') {
+        // exp is "above" base in display: ↑ in base → exp; ↓ in exp → base.
+        if (dir < 0) nextIdx = idx === 0 ? 1 : -1;
+        else nextIdx = idx === 1 ? 0 : -1;
       }
+      // sqrt/abs (single slot) always exit on ↑/↓.
+
       if (nextIdx === -1) {
         cursor.slot = null;
-        moveCursor(cursor.r + dir, cursor.c);
+        moveCursor(cursor.r + dir, cursor.c, { autoEnterSlot: false });
       } else {
         cursor.slot = slots[nextIdx];
         repaintCell(cursor.r, cursor.c);
@@ -607,32 +620,50 @@ export async function mountEditor(root, notebookId) {
     cursor.slot = null;
     if (dir === 0) {
       repaintCell(cursor.r, cursor.c);
-    } else {
-      moveCursor(cursor.r, cursor.c + (dir > 0 ? 1 : -1));
+      return;
     }
+    const targetC = cursor.c + (dir > 0 ? 1 : -1);
+    if (targetC < 0 || targetC >= activeWorkBlock.cols) {
+      // No room to move — at least clear the slot highlight in place.
+      repaintCell(cursor.r, cursor.c);
+      return;
+    }
+    moveCursor(cursor.r, targetC, { autoEnterSlot: false });
   }
 
-  function moveCursor(r, c) {
+  function moveCursor(r, c, options) {
     if (!activeWorkBlock) return;
     const nr = clamp(r, 0, activeWorkBlock.rows - 1);
     const nc = clamp(c, 0, activeWorkBlock.cols - 1);
-    moveCursorTo(nr, nc, null);
+    moveCursorTo(nr, nc, null, options);
   }
 
-  function moveCursorTo(r, c, slot) {
+  // Reconcile cursor position + slot. Called for both navigation and
+  // tap-to-position. autoEnterSlot defaults to true so tapping a composite
+  // lands you inside its first slot — but exit paths pass false so the user
+  // isn't immediately re-entered into an adjacent composite they were trying
+  // to step past.
+  function moveCursorTo(r, c, slot, options = {}) {
     if (!activeWorkBlock) return;
+    const { autoEnterSlot = true } = options;
     const nr = clamp(r, 0, activeWorkBlock.rows - 1);
     const nc = clamp(c, 0, activeWorkBlock.cols - 1);
-    if (nr === cursor.r && nc === cursor.c && (slot || null) === cursor.slot) return;
+    const target = getCellAt(nr, nc);
+
+    let effectiveSlot = slot || null;
+    if (effectiveSlot != null && !isComposite(target)) {
+      // Asked for a slot but the cell isn't composite — discard.
+      effectiveSlot = null;
+    } else if (effectiveSlot == null && autoEnterSlot && isComposite(target)) {
+      effectiveSlot = compositeSlots(target)[0] || null;
+    }
+
+    if (nr === cursor.r && nc === cursor.c && effectiveSlot === cursor.slot) return;
+
     const prev = { r: cursor.r, c: cursor.c, slot: cursor.slot };
     cursor.r = nr;
     cursor.c = nc;
-    cursor.slot = slot || null;
-    // If moving into a composite cell with no slot specified, enter the first slot.
-    const target = getCellAt(nr, nc);
-    if (isComposite(target) && cursor.slot == null) {
-      cursor.slot = compositeSlots(target)[0] || null;
-    }
+    cursor.slot = effectiveSlot;
     updateCursor(activeGrid, prev, cursor, getCellAt);
   }
 
