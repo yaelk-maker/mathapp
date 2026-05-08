@@ -122,9 +122,11 @@ export function isCompositeEmpty(cell) {
 // per character made the fraction bar 2-3× wider than the digits, wasting
 // horizontal space. We pack CHARS_PER_FRACTION_CELL chars per cell so the
 // bar hugs the calculation. At 38px cells with a ~14px monospace fraction
-// font (≈9-10px per char including letter-spacing), four chars fit per cell
-// almost exactly — landing the bar right at the text edge.
-const CHARS_PER_FRACTION_CELL = 4;
+// font (≈9-10px per char including letter-spacing), five chars fit per cell
+// almost exactly — landing the bar right at the text edge while letting
+// longer numerators/denominators (e.g. 12345) live in two cells instead of
+// three, so the kid hits the grid edge less often.
+const CHARS_PER_FRACTION_CELL = 5;
 export function compositeWidth(cell) {
   if (!isComposite(cell)) return 1;
   if (cell.type === COMPOSITE.FRACTION) {

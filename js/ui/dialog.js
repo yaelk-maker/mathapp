@@ -195,7 +195,7 @@ export function promptDialog({
 // Lightweight Hebrew toast for non-blocking confirmations like "שוחזרו N
 // מחברות". Replaces the alert() calls in main.js so we don't pop the native
 // English-chrome banner.
-export function toast(message, { duration = 2400 } = {}) {
+export function toast(message, { duration = 2400, kind = 'info' } = {}) {
   const el = document.createElement('div');
   el.className = 'dialog-overlay';
   el.style.background = 'transparent';
@@ -211,9 +211,33 @@ export function toast(message, { duration = 2400 } = {}) {
   card.style.fontSize = '15px';
   card.style.fontWeight = '600';
   card.style.boxShadow = '0 6px 22px rgba(0, 0, 0, 0.18)';
+  if (kind === 'error') {
+    card.style.background = '#fdeceb';
+    card.style.color = '#8a1f15';
+    card.style.border = '1px solid #c0392b';
+  } else if (kind === 'warn') {
+    card.style.background = '#fff5e1';
+    card.style.color = '#7a4f00';
+    card.style.border = '1px solid #e6a700';
+  }
   card.textContent = message;
 
   el.appendChild(card);
   document.body.appendChild(el);
   setTimeout(() => el.remove(), duration);
+}
+
+// Save errors are the worst kind of silent failure for the kid: ink/digits
+// appear on screen but never make it to IndexedDB (quota, transaction
+// abort), and on reload the work is gone. We surface a Hebrew toast — but
+// throttle to once every SAVE_TOAST_COOLDOWN_MS so a runaway failure loop
+// doesn't fill the screen with banners. Prefer this over toast() at every
+// call site so the cooldown applies globally.
+const SAVE_TOAST_COOLDOWN_MS = 4000;
+let lastSaveErrorAt = 0;
+export function notifySaveError(message = 'השמירה נכשלה — נסי לגבות את המחברת.') {
+  const now = Date.now();
+  if (now - lastSaveErrorAt < SAVE_TOAST_COOLDOWN_MS) return;
+  lastSaveErrorAt = now;
+  toast(message, { kind: 'error', duration: 4200 });
 }

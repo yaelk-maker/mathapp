@@ -14,7 +14,8 @@ import {
   pickJSONFile,
   readJSONFile
 } from './io/export.js';
-import { confirmDialog, promptDialog, toast } from './ui/dialog.js';
+import { confirmDialog, promptDialog, toast, notifySaveError } from './ui/dialog.js';
+import { installSystemKeyboardBridge } from './ui/system-keyboard.js';
 
 // Press-and-hold duration for the destructive notebook delete. Matches the
 // 700ms transition on .notebook-card__delete--arming so the visual fill
@@ -35,8 +36,36 @@ async function init() {
     }
   }
 
+  // Bridge the iPadOS system keyboard with our layout — keeps modal dialogs
+  // anchored above the on-screen keyboard and hides the in-app math keypad
+  // while the kid types into a real <input>.
+  installSystemKeyboardBridge();
+
+  // Surface unhandled IDB / save-pipeline errors as a Hebrew toast instead
+  // of letting them rot in the console. Without this the kid's homework can
+  // silently fail to persist (quota exceeded, transaction abort) with no
+  // user-visible signal.
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    const name = reason && reason.name;
+    if (name === 'QuotaExceededError' || name === 'AbortError' ||
+        name === 'TransactionInactiveError' || name === 'InvalidStateError') {
+      notifySaveError();
+    }
+  });
+
   window.addEventListener('hashchange', render);
-  await render();
+  try {
+    await render();
+  } catch (err) {
+    console.error('Initial render failed:', err);
+    await confirmDialog({
+      title: 'תקלה בטעינה',
+      body: 'לא הצלחנו לטעון את המחברות. נסי לרענן את הדף.',
+      confirmLabel: 'אישור',
+      cancelLabel: 'סגירה'
+    });
+  }
 }
 
 async function render() {

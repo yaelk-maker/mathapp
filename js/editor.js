@@ -47,7 +47,7 @@ import { renderKeypad, keyboardEventToCode } from './input/keypad.js';
 import { renderHebrewKeypad } from './input/hebrew-keypad.js';
 import { uploadWorksheet } from './io/import.js';
 import { attachPencilSurface } from './input/pencil.js';
-import { confirmDialog, promptDialog } from './ui/dialog.js';
+import { confirmDialog, promptDialog, notifySaveError, toast } from './ui/dialog.js';
 
 const CHAR_KEYS = new Set([
   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
@@ -906,6 +906,7 @@ export async function mountEditor(root, notebookId) {
         liveStrokeOffsets.delete(id);
         const savePromise = addStroke(stroke).catch((err) => {
           console.error('Failed to save stroke:', err);
+          notifySaveError();
         });
         pendingStrokeSaves.add(savePromise);
         savePromise.finally(() => pendingStrokeSaves.delete(savePromise));
@@ -1119,7 +1120,9 @@ export async function mountEditor(root, notebookId) {
   // Append a char into a composite slot, expanding the cell's width if the
   // slot grows. Refuses to expand when the next column is taken (directly
   // or by another wider anchor) or beyond the grid edge — and flashes the
-  // cell so the kid knows the press didn't take.
+  // cell so the kid knows the press didn't take. On a grid-edge refusal we
+  // also surface a Hebrew toast so the kid has a recovery path instead of
+  // just a silent red flash (see reference/long fraction.jpeg).
   function appendToSlot(cell, r, c, slot, ch) {
     const oldWidth = compositeWidth(cell);
     const tentativeValue = (cell[slot] || '') + ch;
@@ -1131,6 +1134,7 @@ export async function mountEditor(root, notebookId) {
         const nextC = c + i;
         if (nextC >= activeWorkBlock.cols) {
           flashRefuse(r, c);
+          notifyFractionEdge();
           return;
         }
         if (activeWorkBlock.cells[`${r},${nextC}`]) {
@@ -1151,6 +1155,20 @@ export async function mountEditor(root, notebookId) {
       repaintCell(r, c);
     }
     queueSave();
+  }
+
+  // Toast the kid once per ~5s when a fraction can't grow because it hit
+  // the grid edge. Without this, the only feedback is a 260ms red flash on
+  // the cell — easy to miss, and gives no hint about what to do next.
+  let lastFractionEdgeToastAt = 0;
+  function notifyFractionEdge() {
+    const now = Date.now();
+    if (now - lastFractionEdgeToastAt < 5000) return;
+    lastFractionEdgeToastAt = now;
+    toast('השבר ארוך מדי לשורה — נסי מספרים קצרים יותר או הוסיפי אזור פתרון חדש.', {
+      kind: 'warn',
+      duration: 3600
+    });
   }
 
   // POW pressed inside a slot: cycle the trailing superscript digit (²→³→⁴…)
@@ -1521,6 +1539,7 @@ export async function mountEditor(root, notebookId) {
         await savePage(page);
       } catch (err) {
         console.error('Save failed:', err);
+        notifySaveError();
       }
     })();
     pendingPageSaves.add(p);
