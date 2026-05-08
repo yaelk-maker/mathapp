@@ -556,8 +556,9 @@ export async function mountEditor(root, notebookId) {
   }
 
   // Append a char into a composite slot, expanding the cell's width if the
-  // slot grows. Refuses to expand when the next column is taken or beyond
-  // the grid edge.
+  // slot grows. Refuses to expand when the next column is taken (directly
+  // or by another wider anchor) or beyond the grid edge — and flashes the
+  // cell so the kid knows the press didn't take.
   function appendToSlot(cell, r, c, slot, ch) {
     const oldWidth = compositeWidth(cell);
     const tentativeValue = (cell[slot] || '') + ch;
@@ -565,10 +566,20 @@ export async function mountEditor(root, notebookId) {
     const newWidth = compositeWidth(hypothetical);
 
     if (newWidth > oldWidth) {
-      // Check each new column we'd consume is in-bounds and unoccupied.
       for (let i = oldWidth; i < newWidth; i += 1) {
-        if (c + i >= activeWorkBlock.cols) return; // hit right edge
-        if (activeWorkBlock.cells[`${r},${c + i}`]) return; // collision
+        const nextC = c + i;
+        if (nextC >= activeWorkBlock.cols) {
+          flashRefuse(r, c);
+          return;
+        }
+        if (activeWorkBlock.cells[`${r},${nextC}`]) {
+          flashRefuse(r, c);
+          return;
+        }
+        if (findOccupyingAnchor(activeWorkBlock, r, nextC)) {
+          flashRefuse(r, c);
+          return;
+        }
       }
     }
 
@@ -579,6 +590,15 @@ export async function mountEditor(root, notebookId) {
       repaintCell(r, c);
     }
     queueSave();
+  }
+
+  // Briefly flash a cell red to indicate "no room — input refused".
+  function flashRefuse(r, c) {
+    if (!activeGrid) return;
+    const el = activeGrid.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+    if (!el) return;
+    el.classList.add('cell--refuse');
+    setTimeout(() => el.classList.remove('cell--refuse'), 260);
   }
 
   function insertComposite(template) {
@@ -619,18 +639,29 @@ export async function mountEditor(root, notebookId) {
     }
 
     const existing = getCellAt(r, c);
-    // If user is on an empty cell, place composite there. If cell has content,
-    // advance to next column first.
+    // If the cursor is on a cell with content, advance past its full width
+    // (wide composites take more than one column) and refuse if the next
+    // position is also taken — never silently overwrite an existing cell.
     let targetR = r;
     let targetC = c;
     if (existing) {
-      if (c + 1 >= activeWorkBlock.cols) return; // no room
-      targetC = c + 1;
+      targetC = c + compositeWidth(existing);
+      if (
+        targetC >= activeWorkBlock.cols ||
+        activeWorkBlock.cells[`${targetR},${targetC}`] ||
+        findOccupyingAnchor(activeWorkBlock, targetR, targetC)
+      ) {
+        flashRefuse(r, c);
+        return;
+      }
+    } else if (findOccupyingAnchor(activeWorkBlock, targetR, targetC)) {
+      // The current cell IS occupied (visually rendered as part of a wider
+      // composite to the left). Refuse rather than corrupt the model.
+      flashRefuse(r, c);
+      return;
     }
     activeWorkBlock.cells[`${targetR},${targetC}`] = template;
     const slots = compositeSlots(template);
-    // Repaint the new composite cell, then move cursor (which will repaint
-    // again with the active slot highlight).
     updateCell(activeGrid, activeWorkBlock, targetR, targetC);
     moveCursorTo(targetR, targetC, slots[0] || null);
     queueSave();

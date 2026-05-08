@@ -451,6 +451,16 @@ h1 {
   z-index: 1;
 }
 
+/* Flashed when an action is refused (e.g. fraction can't expand because the
+   next cell is taken or the grid edge is reached). */
+.cell--refuse {
+  animation: cellRefuse 260ms ease-out;
+}
+@keyframes cellRefuse {
+  0%   { background: rgba(192, 57, 43, 0.45); }
+  100% { background: transparent; }
+}
+
 /* --- Composite cells (Phase 5) --- */
 
 .cell--composite {
