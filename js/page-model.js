@@ -108,12 +108,20 @@ export function isCompositeEmpty(cell) {
 
 // How many grid columns a cell occupies. Fractions expand to fit their
 // numerator and denominator; everything else is 1 cell wide.
+//
+// Each character in a fraction slot is rendered at ~0.6em with tight letter
+// spacing — significantly narrower than a full grid cell. Reserving one cell
+// per character (the old behaviour) made the fraction bar 2-3× wider than the
+// digits, wasting horizontal space. We pack ~CHARS_PER_CELL chars per cell so
+// the bar hugs the calculation.
+const CHARS_PER_FRACTION_CELL = 2;
 export function compositeWidth(cell) {
   if (!isComposite(cell)) return 1;
   if (cell.type === COMPOSITE.FRACTION) {
     const numLen = (cell.num || '').length;
     const denLen = (cell.den || '').length;
-    return Math.max(numLen, denLen, 1);
+    const maxLen = Math.max(numLen, denLen);
+    return Math.max(Math.ceil(maxLen / CHARS_PER_FRACTION_CELL), 1);
   }
   return 1;
 }

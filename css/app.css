@@ -539,12 +539,14 @@ h1 {
   margin: 2px auto;
 }
 
-/* For wide (multi-column) fractions, digits should sit naturally with
-   light tracking so they read as a number (1 2 → "12"), not as columns. */
+/* For wide (multi-column) fractions, digits sit with light tracking so the
+   bar hugs the calculation. Tight letter-spacing pairs with the reduced
+   per-cell character density in compositeWidth — together they keep the bar
+   roughly the same width as the digits. */
 .cell--span .composite__num,
 .cell--span .composite__den {
-  letter-spacing: 0.45em;
-  padding: 0 0.2em;
+  letter-spacing: 0.08em;
+  padding: 0 2px;
 }
 
 /* Slot highlight when cursor is inside */
@@ -602,11 +604,55 @@ h1 {
   background: #f0f0f0;
   border-radius: 12px;
   padding: 8px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Sectioned keypad: a horizontal row of independent grids. Each section
+   keeps its own column alignment (3x3 digits, 3-wide arrow cross, etc.)
+   without leaking spacing into the others. Sections are vertically centered
+   so the shorter ones (arrows = 3 rows, composites = 2 rows) sit nicely
+   alongside the 4-row digits block instead of stretching to fill. */
+.keypad--sectioned {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.keypad__section {
+  display: grid;
+  gap: 6px;
+  /* Fixed-height rows so keys stay button-sized regardless of how many
+     rows a section has. */
+  grid-auto-rows: 48px;
+  flex: 0 0 auto;
+  align-self: center;
+}
+.keypad__section--ops { flex: 1 1 auto; min-width: 0; }
+
+.keypad__placeholder {
+  visibility: hidden;
+  /* Match key footprint so empty grid cells reserve the right space. */
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Hebrew keypad keeps the legacy flex-row layout for the letter rows
+   (Hebrew QWERTY is variable-width per row), with a sectioned arrow cross
+   pinned to the right. */
+.keypad--hebrew {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 10px;
+}
+.keypad__letters {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  user-select: none;
-  -webkit-user-select: none;
+  min-width: 0;
 }
 
 .keypad__row {
@@ -634,6 +680,12 @@ h1 {
   -webkit-tap-highlight-color: transparent;
   padding: 6px 8px;
   transition: background 0.05s ease, transform 0.05s ease;
+}
+
+/* Inside a CSS-grid section, keys don't need a flex basis. */
+.keypad__section .keypad__key {
+  flex: initial;
+  width: 100%;
 }
 
 .keypad__key:active {

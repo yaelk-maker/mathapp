@@ -369,6 +369,7 @@ export async function mountEditor(root, notebookId) {
       // the grid via the Hebrew keypad.
       if (el) {
         attachBlockChrome(el, block);
+        applyBlockOffset(el, block);
         pageHost.appendChild(el);
       }
     }
@@ -396,6 +397,14 @@ export async function mountEditor(root, notebookId) {
   function attachBlockChrome(el, block) {
     attachBlockDragHandle(el, block);
     if (block.type === BLOCK.WORK) attachWorkBlockResize(el, block);
+  }
+
+  // Apply a block's persisted horizontal offset (set by drag-to-reposition).
+  // Vertical position is still controlled by the document flow / reorder.
+  function applyBlockOffset(el, block) {
+    const x = Number(block.xOffset) || 0;
+    el.style.transform = x ? `translateX(${x}px)` : '';
+    el.dataset.xOffset = String(x);
   }
 
   // Add a small drag handle button to the top-start of the block. Pointer-
@@ -520,29 +529,38 @@ export async function mountEditor(root, notebookId) {
     handle.setPointerCapture(downEvent.pointerId);
 
     const blocksContainer = pageHost;
+    const startX = downEvent.clientX;
     const startY = downEvent.clientY;
-    const elRect = el.getBoundingClientRect();
+    const baseXOffset = Number(block.xOffset) || 0;
 
     dragState = {
       pointerId: downEvent.pointerId,
       block,
       el,
       handle,
+      startX,
       startY,
+      baseXOffset,
+      dx: 0,
+      dy: 0,
       moved: false,
-      indicator: null
+      indicator: null,
+      targetIndex: null
     };
 
     el.classList.add('block--dragging');
 
     const onMove = (e) => {
       if (e.pointerId !== dragState.pointerId) return;
+      const dx = e.clientX - startX;
       const dy = e.clientY - startY;
-      if (!dragState.moved && Math.abs(dy) < 4) return;
+      if (!dragState.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
       dragState.moved = true;
-      el.style.transform = `translateY(${dy}px)`;
+      dragState.dx = dx;
+      dragState.dy = dy;
+      el.style.transform = `translate(${baseXOffset + dx}px, ${dy}px)`;
 
-      // Compute where the block would land if released here. Compare the
+      // Compute where the block would land vertically — compare the
       // pointer's clientY against the midpoint of each sibling block in the
       // CURRENT order (excluding the one being dragged) and find the slot.
       const siblings = [...blocksContainer.children].filter(
@@ -571,20 +589,40 @@ export async function mountEditor(root, notebookId) {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
       el.classList.remove('block--dragging');
-      el.style.transform = '';
       removeDropIndicator();
 
-      if (!ds.moved || ds.targetIndex == null) return;
-      // Build the new ordering by removing the dragged block, then
-      // splicing it in at targetIndex within the "others" list. The
-      // resulting array IS the new page.blocks order.
-      const others = page.blocks.filter((b) => b.id !== ds.block.id);
-      others.splice(ds.targetIndex, 0, ds.block);
-      const sameOrder = others.every((b, i) => b === page.blocks[i]);
-      if (!sameOrder) {
-        page.blocks = others;
+      if (!ds.moved) {
+        // No real movement — restore the original transform so the
+        // persisted xOffset stays applied.
+        applyBlockOffset(el, ds.block);
+        return;
+      }
+
+      // Persist the horizontal offset. Clamp so the kid can't shove a
+      // block far off-screen and lose track of it. The page content is
+      // centered, so we allow ±half the page width as a rough bound.
+      const pageRect = pageContent.getBoundingClientRect();
+      const maxX = Math.max(0, pageRect.width / 2);
+      const newXOffset = clamp(ds.baseXOffset + ds.dx, -maxX, maxX);
+      const xChanged = newXOffset !== (Number(ds.block.xOffset) || 0);
+      if (xChanged) ds.block.xOffset = newXOffset;
+
+      // Reorder vertically.
+      let orderChanged = false;
+      if (ds.targetIndex != null) {
+        const others = page.blocks.filter((b) => b.id !== ds.block.id);
+        others.splice(ds.targetIndex, 0, ds.block);
+        orderChanged = !others.every((b, i) => b === page.blocks[i]);
+        if (orderChanged) page.blocks = others;
+      }
+
+      if (xChanged || orderChanged) {
         await savePage(page);
         await renderBlocks();
+      } else {
+        // Nothing to commit — just snap the visual back to the persisted
+        // offset (clears the in-drag transform).
+        applyBlockOffset(el, ds.block);
       }
     };
 
@@ -889,13 +927,12 @@ export async function mountEditor(root, notebookId) {
 
   // ---------- input dispatch ----------
 
-  // Hebrew keypad presses target the focused textarea. If nothing is
-  // focused, refocus the most recently used one (or the first text block on
-  // the page) so the first press doesn't silently drop.
   // Hebrew presses go into the same work-block grid the math keypad targets
-  // — one Hebrew letter per cell. SPACE just advances the cursor (a literal
-  // ' ' in a cell would erase it via the empty-ch path), NEWLINE drops to
-  // the next row's first column, BACKSPACE / arrows reuse the math handlers.
+  // — one Hebrew letter per cell. Hebrew is RTL: typing advances the cursor
+  // LEFT, SPACE advances LEFT, NEWLINE drops to the next row's RIGHTMOST
+  // column, and BACKSPACE deletes the most recently typed cell (which is to
+  // the RIGHT of the current cursor position). Arrow keys still navigate
+  // freely so the kid can fix a single letter without deleting through.
   function handleHebrewKey(code) {
     if (code === 'TOGGLE_KEYPAD') {
       setKeypadMode('math');
@@ -903,12 +940,53 @@ export async function mountEditor(root, notebookId) {
     }
     if (!activeWorkBlock) return;
     switch (code) {
-      case 'BACKSPACE': backspace(); return;
-      case 'SPACE': moveCursor(cursor.r, cursor.c + 1); return;
-      case 'NEWLINE': moveCursor(cursor.r + 1, 0); return;
+      case 'BACKSPACE': backspaceRTL(); return;
+      case 'SPACE': moveCursor(cursor.r, cursor.c - 1); return;
+      case 'NEWLINE':
+        moveCursor(cursor.r + 1, activeWorkBlock.cols - 1);
+        return;
+      case 'LEFT': arrowHorizontal(-1); return;
+      case 'RIGHT': arrowHorizontal(1); return;
+      case 'UP': arrowVertical(-1); return;
+      case 'DOWN': arrowVertical(1); return;
       default:
-        // Single Hebrew letter or punctuation — insert as a one-char atom.
-        insertChar(code);
+        // Single Hebrew letter or punctuation — insert as a one-char atom
+        // and advance the cursor LEFT so the next letter lands to the
+        // left of this one (RTL flow).
+        insertCharRTL(code);
+    }
+  }
+
+  // Same as insertChar but advances the cursor LEFT (toward c=0) instead of
+  // right. Used by the Hebrew keypad so typed text reads right-to-left.
+  function insertCharRTL(ch) {
+    const r = cursor.r;
+    const c = cursor.c;
+    activeWorkBlock.cells[`${r},${c}`] = { ch };
+    updateCell(activeGrid, activeWorkBlock, r, c);
+    if (c > 0) moveCursor(r, c - 1);
+    queueSave();
+  }
+
+  // RTL backspace: the most recently typed cell sits to the RIGHT of the
+  // cursor (because typing advances left). Delete it, then place the cursor
+  // there so the next press overwrites in place.
+  function backspaceRTL() {
+    const r = cursor.r;
+    const c = cursor.c;
+    const here = getCellAt(r, c);
+    if (here) {
+      delete activeWorkBlock.cells[`${r},${c}`];
+      updateCell(activeGrid, activeWorkBlock, r, c);
+      queueSave();
+      return;
+    }
+    if (c + 1 < activeWorkBlock.cols) {
+      const nc = c + 1;
+      delete activeWorkBlock.cells[`${r},${nc}`];
+      updateCell(activeGrid, activeWorkBlock, r, nc);
+      moveCursor(r, nc);
+      queueSave();
     }
   }
 
@@ -1318,6 +1396,7 @@ export async function mountEditor(root, notebookId) {
     // Reattach drag + resize handles. Without this they vanish whenever a
     // fraction widens (or any other in-place rerender).
     attachBlockChrome(newWrapper, activeWorkBlock);
+    applyBlockOffset(newWrapper, activeWorkBlock);
     parent.replaceChild(newWrapper, wrapper);
     activeGrid = newGrid;
   }
