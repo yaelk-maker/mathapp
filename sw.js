@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v15';
+const CACHE = 'mathapp-shell-v16';
 const SHELL = [
   './',
   './index.html',
@@ -11,7 +11,9 @@ const SHELL = [
   './js/render/grid.js',
   './js/render/worksheet.js',
   './js/render/strokes.js',
+  './js/render/textblock.js',
   './js/input/keypad.js',
+  './js/input/hebrew-keypad.js',
   './js/input/pencil.js',
   './js/io/import.js',
   './js/io/export.js',
