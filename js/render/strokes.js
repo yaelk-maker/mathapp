@@ -2,16 +2,23 @@
 // the canvas renders at devicePixelRatio for crisp lines.
 
 export function sizeCanvas(canvas, container) {
-  const rect = container.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
-  // Use the container's scroll size so strokes outside the viewport still
-  // get drawn (the container scrolls; the canvas is full-extent).
-  const width = container.scrollWidth || rect.width;
-  const height = container.scrollHeight || rect.height;
+  // Temporarily collapse the canvas so it doesn't contribute to the
+  // container's scroll size when we measure (otherwise growing the canvas
+  // would feed back and grow the container, locking the size at the largest
+  // value ever seen).
+  const prevW = canvas.style.width;
+  const prevH = canvas.style.height;
+  canvas.style.width = '0px';
+  canvas.style.height = '0px';
+  const width = container.scrollWidth || container.getBoundingClientRect().width;
+  const height = container.scrollHeight || container.getBoundingClientRect().height;
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
   canvas.style.width = width + 'px';
   canvas.style.height = height + 'px';
+  // (prevW/prevH no longer needed; we set the new sizes.)
+  void prevW; void prevH;
   return dpr;
 }
 

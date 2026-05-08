@@ -237,21 +237,10 @@ h1 {
 
 /* --- Pencil canvas overlay --- */
 
-.editor__page-wrap {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.editor__page-wrap .editor__page {
-  flex: none;
-  height: 100%;
-}
-
 .pencil-canvas {
   position: absolute;
-  top: 16px;
-  left: 16px;
+  top: 0;
+  left: 0;
   pointer-events: none;
   z-index: 5;
   /* Disable touch panning on the canvas; lets pen events through cleanly. */
@@ -262,14 +251,30 @@ h1 {
   pointer-events: auto;
 }
 
+/* The page is the SCROLL container; its inner content holds the blocks AND
+   the pencil canvas, so they scroll together. */
 .editor--full .editor__page {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 16px;
   background: white;
   border: 1px solid var(--border);
   border-radius: 8px;
+  position: relative;
+}
+.editor__page-content {
+  position: relative;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  min-height: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+#page {
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -555,9 +560,6 @@ h1 {
     padding: 0;
     min-height: 0;
   }
-  .editor__page-wrap {
-    position: static;
-  }
   .editor__page {
     overflow: visible !important;
     border: none !important;
@@ -565,6 +567,10 @@ h1 {
     height: auto !important;
     background: white !important;
     padding: 0 !important;
+  }
+  .editor__page-content {
+    padding: 0 !important;
+    min-height: 0 !important;
   }
   .pencil-print-snapshot {
     display: block !important;
@@ -575,6 +581,14 @@ h1 {
   .cell {
     border-right-color: #bbb !important;
     border-bottom-color: #bbb !important;
+  }
+  /* Constrain very tall worksheet photos so they fit on a printed page.
+     A 2048px photo at letter-page width would otherwise be ~15 inches tall. */
+  .worksheet__image {
+    max-height: 9in !important;
+    width: auto !important;
+    max-width: 100% !important;
+    object-fit: contain;
   }
   /* Avoid splitting a worksheet image across pages */
   .worksheet, .workblock {

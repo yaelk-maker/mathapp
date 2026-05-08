@@ -122,9 +122,11 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="clear-strokes">🗑️ נקה ציורים</button>
         </span>
       </div>
-      <div class="editor__page-wrap">
-        <div class="editor__page" id="page"></div>
-        <canvas class="pencil-canvas" id="pencil-canvas"></canvas>
+      <div class="editor__page" id="page-scroll">
+        <div class="editor__page-content" id="page-content">
+          <div id="page"></div>
+          <canvas class="pencil-canvas" id="pencil-canvas"></canvas>
+        </div>
       </div>
       <div class="editor__keypad-host" id="keypad-host"></div>
     </div>
@@ -132,11 +134,14 @@ export async function mountEditor(root, notebookId) {
 
   document.getElementById('title').textContent = nb.name;
   document.getElementById('back-home').addEventListener('click', async () => {
-    flushSave();
     detachPencilIfAny();
-    // Wait for any in-flight stroke saves before navigating — otherwise a
-    // freshly drawn stroke can be lost between pointerup and the IDB write.
-    await Promise.allSettled([...pendingStrokeSaves]);
+    // Wait for both pending page saves AND in-flight stroke saves before
+    // navigating away — otherwise a typed digit or a lifted Pencil can be
+    // lost between the action and the IDB write committing.
+    await Promise.all([
+      flushSave(),
+      Promise.allSettled([...pendingStrokeSaves])
+    ]);
     revokeWorksheetUrls();
     window.location.hash = '';
   });
@@ -220,6 +225,7 @@ export async function mountEditor(root, notebookId) {
   }
 
   const pageHost = document.getElementById('page');
+  const pageContent = document.getElementById('page-content');
   canvas = document.getElementById('pencil-canvas');
   ctx = canvas.getContext('2d');
 
@@ -398,7 +404,9 @@ export async function mountEditor(root, notebookId) {
       }
       return;
     }
-    sizeCanvas(canvas, pageHost);
+    // Size against the content wrapper (whose size is driven by the blocks).
+    // The canvas lives inside the scrollable page so it scrolls with content.
+    sizeCanvas(canvas, pageContent);
     replayStrokes(canvas, strokes);
     canvas.classList.toggle('pencil-canvas--active', pencilEnabled);
   }
@@ -715,24 +723,37 @@ export async function mountEditor(root, notebookId) {
   // ---------- debounced save ----------
 
   let saveTimer = null;
+  // Track all pending save promises so cleanup can await them and we never
+  // lose a typed digit by tearing down the editor between debounce-fire
+  // and the IDB transaction completing.
+  const pendingPageSaves = new Set();
+
   function queueSave() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(doSave, SAVE_DEBOUNCE_MS);
   }
+
+  // Returns a Promise that resolves once any pending save has been awaited.
   function flushSave() {
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;
-      doSave();
+      doSave(); // adds to pendingPageSaves
     }
+    return Promise.allSettled([...pendingPageSaves]);
   }
-  async function doSave() {
+
+  function doSave() {
     saveTimer = null;
-    try {
-      await savePage(page);
-    } catch (err) {
-      console.error('Save failed:', err);
-    }
+    const p = (async () => {
+      try {
+        await savePage(page);
+      } catch (err) {
+        console.error('Save failed:', err);
+      }
+    })();
+    pendingPageSaves.add(p);
+    p.finally(() => pendingPageSaves.delete(p));
   }
 }
 

@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v6';
+const CACHE = 'mathapp-shell-v7';
 const SHELL = [
   './',
   './index.html',
@@ -18,7 +18,13 @@ const SHELL = [
   './vendor/idb.js',
   './icons/icon-180.png',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './icons/splash-1668x2388.png',
+  './icons/splash-2388x1668.png',
+  './icons/splash-1620x2160.png',
+  './icons/splash-2160x1620.png',
+  './icons/splash-1024x1366.png',
+  './icons/splash-1366x1024.png'
 ];
 
 self.addEventListener('install', (event) => {
