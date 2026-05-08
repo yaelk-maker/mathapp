@@ -123,6 +123,7 @@ export async function mountEditor(root, notebookId) {
         </span>
       </div>
       <div class="editor__page" id="page-scroll">
+        <div class="pen-mode-indicator">✏️ מצב ציור — צייר עם העט</div>
         <div class="editor__page-content" id="page-content">
           <div id="page"></div>
           <canvas class="pencil-canvas" id="pencil-canvas"></canvas>

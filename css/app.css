@@ -27,16 +27,30 @@ body {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  /* Keep the document anchored to the viewport. Internal containers
+     (.screen, .editor__page) scroll inside their own bounds, so the iPad
+     keypad never gets pushed below the visible area. */
+  overflow: hidden;
 }
 
 #app {
-  min-height: 100%;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* Use dynamic viewport height when supported (avoids iOS Safari URL-bar
+     jumps); fall back to 100vh otherwise. */
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
 
 .screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px;
+  /* Safe-area insets (status bar, home indicator) on iPadOS PWA standalone */
+  padding-top: calc(24px + env(safe-area-inset-top));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
   max-width: 900px;
   margin: 0 auto;
 }
@@ -178,10 +192,15 @@ h1 {
 /* ===== Editor + grid + keypad (Phase 2) ===== */
 
 .editor--full {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
   padding: 8px;
+  /* Safe-area insets so the keypad sits above the iPadOS home indicator
+     and the topbar clears the status bar. */
+  padding-top: calc(8px + env(safe-area-inset-top));
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
   max-width: none;
 }
 
@@ -249,6 +268,34 @@ h1 {
 
 .pencil-canvas--active {
   pointer-events: auto;
+}
+
+/* When pen mode is on, ring the page so the kid knows the drawing surface
+   is live. Without this cue it's easy to think the toggle did nothing. */
+.editor--full:has(.pencil-canvas--active) .editor__page {
+  outline: 3px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Banner on top of the page when pen mode is active */
+.pen-mode-indicator {
+  display: none;
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  background: var(--accent);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(11, 108, 242, 0.3);
+}
+.editor--full:has(.pencil-canvas--active) .pen-mode-indicator {
+  display: block;
 }
 
 /* The page is the SCROLL container; its inner content holds the blocks AND
