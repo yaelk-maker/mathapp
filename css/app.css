@@ -1249,6 +1249,19 @@ h1 {
   padding-top: calc(16px + env(safe-area-inset-top));
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
+/* When the iPadOS system keyboard is up the layout viewport doesn't shrink
+   but the visualViewport does. Top-anchor the dialog inside the visible
+   area (--vv-offset-top is set by js/ui/system-keyboard.js) so the input
+   never sits behind the keyboard. */
+body.system-kbd-up .dialog-overlay {
+  align-items: flex-start;
+  padding-top: calc(env(safe-area-inset-top) + 24px + var(--vv-offset-top, 0px));
+}
+/* Hide the in-app math keypad while a real <input> is focused — the system
+   keyboard covers it anyway, and showing both at once is confusing. */
+body.system-kbd-up .editor__keypad-host {
+  visibility: hidden;
+}
 .dialog {
   background: var(--card);
   color: var(--fg);
