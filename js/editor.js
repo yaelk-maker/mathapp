@@ -70,12 +70,15 @@ export async function mountEditor(root, notebookId) {
   let pencilEnabled = false;
   let eraserMode = false;
   let penColor = PEN_COLORS[0];
-  let penWidth = 2.4;
+  const penWidth = 2.4;
   let canvas = null;
   let ctx = null;
   let detachPencil = null;
   const liveStrokes = new Map(); // strokeId -> stroke being drawn
-  let liveDrawnPointCount = new Map(); // strokeId -> last drawn index
+  const liveDrawnPointCount = new Map(); // strokeId -> last drawn index
+  // In-flight stroke save promises. Cleanup must await these so the kid never
+  // loses a stroke by tapping "back" right after lifting the Pencil.
+  const pendingStrokeSaves = new Set();
 
   root.innerHTML = `
     <div class="editor editor--full">
@@ -108,10 +111,13 @@ export async function mountEditor(root, notebookId) {
   `;
 
   document.getElementById('title').textContent = nb.name;
-  document.getElementById('back-home').addEventListener('click', () => {
+  document.getElementById('back-home').addEventListener('click', async () => {
     flushSave();
-    revokeWorksheetUrls();
     detachPencilIfAny();
+    // Wait for any in-flight stroke saves before navigating — otherwise a
+    // freshly drawn stroke can be lost between pointerup and the IDB write.
+    await Promise.allSettled([...pendingStrokeSaves]);
+    revokeWorksheetUrls();
     window.location.hash = '';
   });
   document.getElementById('rename').addEventListener('click', async () => {
@@ -290,16 +296,16 @@ export async function mountEditor(root, notebookId) {
         renderStrokeIncremental(ctx, stroke, from, dpr);
         liveDrawnPointCount.set(id, stroke.points.length);
       },
-      onStrokeEnd: async (id) => {
+      onStrokeEnd: (id) => {
         const stroke = liveStrokes.get(id);
         if (!stroke) return;
         liveStrokes.delete(id);
         liveDrawnPointCount.delete(id);
-        try {
-          await addStroke(stroke);
-        } catch (err) {
+        const savePromise = addStroke(stroke).catch((err) => {
           console.error('Failed to save stroke:', err);
-        }
+        });
+        pendingStrokeSaves.add(savePromise);
+        savePromise.finally(() => pendingStrokeSaves.delete(savePromise));
       }
     });
   }
@@ -311,13 +317,31 @@ export async function mountEditor(root, notebookId) {
     }
   }
 
+  let resizeAndReplayPending = false;
   function resizeAndReplay() {
     if (!canvas || !pageHost) return;
-    const wasEnabled = pencilEnabled;
+    // Never wipe the canvas mid-stroke — the destination-out / lineWidth
+    // state belongs to the live stroke; clearing now would cause artifacts
+    // and lose the live stroke's drawn pixels until the next replay.
+    if (liveStrokes.size > 0) {
+      if (!resizeAndReplayPending) {
+        resizeAndReplayPending = true;
+        const retry = () => {
+          resizeAndReplayPending = false;
+          if (liveStrokes.size > 0) {
+            // Still drawing — try again after a frame.
+            requestAnimationFrame(retry);
+          } else {
+            resizeAndReplay();
+          }
+        };
+        requestAnimationFrame(retry);
+      }
+      return;
+    }
     sizeCanvas(canvas, pageHost);
     replayStrokes(canvas, strokes);
-    // Keep the canvas's pointer-events state in sync with mode.
-    canvas.classList.toggle('pencil-canvas--active', wasEnabled);
+    canvas.classList.toggle('pencil-canvas--active', pencilEnabled);
   }
 
   async function undoLastStroke() {
@@ -337,8 +361,21 @@ export async function mountEditor(root, notebookId) {
   async function clearAllStrokes() {
     if (strokes.length === 0) return;
     if (!window.confirm('למחוק את כל הציורים בדף הזה?')) return;
-    strokes.length = 0;
-    await clearStrokesForPage(page.id);
+    // Snapshot the IDs we're committing to delete. Any new strokes that
+    // arrive after this snapshot (e.g. a pointerup completing right now)
+    // are intentionally preserved.
+    const idsToDelete = strokes.map((s) => s.id);
+    const idSet = new Set(idsToDelete);
+    // Wait for any in-flight stroke saves to finish first — otherwise a
+    // mid-flight save could re-add a stroke we just cleared from IDB.
+    await Promise.allSettled([...pendingStrokeSaves]);
+    for (const id of idsToDelete) {
+      try { await deleteStrokeById(id); } catch (_) {}
+    }
+    // Drop only the strokes we snapshotted; keep any added during the await.
+    for (let i = strokes.length - 1; i >= 0; i -= 1) {
+      if (idSet.has(strokes[i].id)) strokes.splice(i, 1);
+    }
     replayStrokes(canvas, strokes);
   }
 

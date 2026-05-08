@@ -67,14 +67,16 @@ export function attachPencilSurface(canvas, options) {
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerUp);
-  canvas.addEventListener('pointerleave', onPointerUp);
+  // NOTE: not listening to 'pointerleave'. Apple Pencil hover events on
+  // iPadOS 14+ can fire spurious leave events during a captured stroke,
+  // which would cut the stroke mid-line. setPointerCapture + pointercancel
+  // covers all genuine end-of-stroke cases.
 
   return function detach() {
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('pointercancel', onPointerUp);
-    canvas.removeEventListener('pointerleave', onPointerUp);
   };
 }
 
