@@ -5,8 +5,7 @@
 
 export const BLOCK = Object.freeze({
   WORK: 'work',
-  WORKSHEET: 'worksheet',
-  TEXT: 'text'
+  WORKSHEET: 'worksheet'
 });
 
 // Composite cell types — Phase 5. Each composite occupies one logical grid
@@ -47,14 +46,6 @@ export function newWorksheetBlock({ blobId, naturalWidth, naturalHeight }) {
     blobId,
     naturalWidth: naturalWidth || 0,
     naturalHeight: naturalHeight || 0
-  };
-}
-
-export function newTextBlock({ content = '' } = {}) {
-  return {
-    type: BLOCK.TEXT,
-    id: blockId(),
-    content
   };
 }
 

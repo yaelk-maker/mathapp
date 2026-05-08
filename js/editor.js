@@ -20,7 +20,6 @@ import {
 import {
   BLOCK,
   newWorkBlock,
-  newTextBlock,
   isComposite,
   compositeSlots,
   isCompositeEmpty,
@@ -36,7 +35,6 @@ import {
   revokeWorksheetUrls,
   revokeBlobUrl
 } from './render/worksheet.js';
-import { renderTextBlock } from './render/textblock.js';
 import {
   sizeCanvas,
   renderStroke,
@@ -99,13 +97,9 @@ export async function mountEditor(root, notebookId) {
   let activeWorkBlock = page.blocks.find((b) => b.type === BLOCK.WORK);
   let activeGrid = null;
 
-  // The textarea that should receive Hebrew keypad presses. Updated by the
-  // text block's focus handler. Cleared on blur (after a short delay so we
-  // can refocus it from a key press without losing the target).
-  let focusedTextarea = null;
-
   // Keypad mode: 'math' (default) or 'hebrew'. Hebrew mode swaps in the
-  // letter keypad and routes presses into the focused textarea.
+  // letter keypad and routes presses into the active work block's grid
+  // (one Hebrew letter per cell, just like math digits).
   let keypadMode = 'math';
 
   // Drawing state
@@ -138,12 +132,10 @@ export async function mountEditor(root, notebookId) {
       <div class="editor__actions">
         <button class="btn btn--ghost" id="upload-photo">📷 צלם דף</button>
         <button class="btn btn--ghost" id="upload-library">🖼️ בחר תמונה</button>
-        <button class="btn btn--ghost" id="add-text">📝 תיבת טקסט</button>
         <button class="btn btn--ghost" id="add-work">➕ אזור פתרון</button>
         <button class="btn btn--ghost" id="toggle-split">🔀 פיצול</button>
         <button class="btn btn--ghost" id="print-page">🖨️ הדפסה</button>
         <span class="editor__sep"></span>
-        <button class="btn btn--ghost" id="toggle-keyboard">🇮🇱 עברית</button>
         <button class="btn btn--ghost" id="toggle-pen">✏️ ציור</button>
         <span class="pen-tools" id="pen-tools" hidden>
           ${PEN_COLORS.map(
@@ -193,7 +185,6 @@ export async function mountEditor(root, notebookId) {
   document.getElementById('upload-library').addEventListener('click', () =>
     addWorksheet({ capture: false })
   );
-  document.getElementById('add-text').addEventListener('click', () => addTextBlock());
   document.getElementById('add-work').addEventListener('click', () => addWorkBlock());
 
   // Split-view toggle: in split mode the worksheet sits next to the work
@@ -298,20 +289,9 @@ export async function mountEditor(root, notebookId) {
   function setKeypadMode(mode) {
     if (mode === keypadMode) return;
     keypadMode = mode;
-    const btn = document.getElementById('toggle-keyboard');
-    if (btn) btn.classList.toggle('btn--active', keypadMode === 'hebrew');
     mountKeypad();
     requestAnimationFrame(() => resizeAndReplay());
   }
-
-  document.getElementById('toggle-keyboard').addEventListener('click', () => {
-    setKeypadMode(keypadMode === 'hebrew' ? 'math' : 'hebrew');
-    // When switching to Hebrew, try to refocus the last text block so the
-    // first key press goes somewhere useful.
-    if (keypadMode === 'hebrew' && focusedTextarea) {
-      focusedTextarea.focus();
-    }
-  });
 
   mountKeypad();
 
@@ -378,26 +358,25 @@ export async function mountEditor(root, notebookId) {
           activeWorkBlock = block;
           activeGrid = grid;
         }
-      } else if (block.type === BLOCK.TEXT) {
-        el = renderTextBlock(block, {
-          onDelete: (id) => removeBlock(id),
-          onFocus: (ta) => {
-            focusedTextarea = ta;
-            // Auto-switch to Hebrew keypad when focusing a text block —
-            // the kid will almost always want Hebrew when the cursor is
-            // in a text answer field.
-            if (keypadMode !== 'hebrew') setKeypadMode('hebrew');
-          },
-          onChange: () => queueSave()
-        });
       }
+      // Any other block type (e.g. legacy 'text' from the short-lived
+      // textbox feature) renders nothing — text is now typed directly on
+      // the grid via the Hebrew keypad.
       if (el) {
-        attachBlockDragHandle(el, block);
+        attachBlockChrome(el, block);
         pageHost.appendChild(el);
       }
     }
     // Allow layout to settle, then resize the canvas to match content.
     requestAnimationFrame(() => resizeAndReplay());
+  }
+
+  // Drag handle on every block + resize handle on work blocks. Called from
+  // renderBlocks AND from rerenderActiveGrid (the latter rebuilds the
+  // wrapper after a fraction widens, and would otherwise drop the handles).
+  function attachBlockChrome(el, block) {
+    attachBlockDragHandle(el, block);
+    if (block.type === BLOCK.WORK) attachWorkBlockResize(el, block);
   }
 
   // Add a small drag handle button to the top-start of the block. Pointer-
@@ -420,6 +399,100 @@ export async function mountEditor(root, notebookId) {
       startBlockDrag(e, el, block, handle);
     });
     el.appendChild(handle);
+  }
+
+  // Resize handle on the bottom-right of a work block. Drag it to add/remove
+  // rows and columns — the kid uses this to shrink the work area when their
+  // solution is short, so the next worksheet image isn't pushed way down by
+  // a long blank grid. Snap to whole cells; persist on pointerup.
+  function attachWorkBlockResize(wrapper, block) {
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'workblock__resize';
+    handle.title = 'גרור כדי לשנות גודל';
+    handle.setAttribute('aria-label', 'שנה גודל');
+    handle.textContent = '⤡';
+    handle.addEventListener('mousedown', (e) => e.preventDefault());
+
+    let state = null;
+
+    handle.addEventListener('pointerdown', (e) => {
+      if (pencilEnabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handle.setPointerCapture(e.pointerId);
+      const grid = wrapper.querySelector('.grid');
+      const cellSize =
+        parseFloat(getComputedStyle(grid).getPropertyValue('--cell-size')) || 38;
+      state = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        origRows: block.rows,
+        origCols: block.cols,
+        cellSize,
+        changed: false
+      };
+      wrapper.classList.add('workblock--resizing');
+    });
+
+    handle.addEventListener('pointermove', (e) => {
+      if (!state || e.pointerId !== state.pointerId) return;
+      const dx = e.clientX - state.startX;
+      const dy = e.clientY - state.startY;
+      const newCols = clamp(
+        state.origCols + Math.round(dx / state.cellSize),
+        4,
+        40
+      );
+      const newRows = clamp(
+        state.origRows + Math.round(dy / state.cellSize),
+        2,
+        40
+      );
+      if (newCols !== block.cols || newRows !== block.rows) {
+        block.cols = newCols;
+        block.rows = newRows;
+        state.changed = true;
+        // Live preview only for the active grid (cheap, in-place rerender).
+        // For other work blocks we wait for pointerup to avoid full
+        // page-rerender storms during the drag.
+        if (activeWorkBlock === block) rerenderActiveGrid();
+      }
+    });
+
+    const onUp = async (e) => {
+      if (!state || e.pointerId !== state.pointerId) return;
+      const wasChanged = state.changed;
+      state = null;
+      try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+      wrapper.classList.remove('workblock--resizing');
+      if (!wasChanged) return;
+
+      // Drop any cells that no longer fit, including composites whose
+      // span would extend past the new column count. Strokes anchored to
+      // this block stay — their points are block-relative, so the user can
+      // still see what was drawn even when the grid shrinks below them.
+      const newCells = {};
+      for (const [key, cell] of Object.entries(block.cells)) {
+        const [r, c] = key.split(',').map(Number);
+        const w = compositeWidth(cell);
+        if (r < block.rows && c + w <= block.cols) newCells[key] = cell;
+      }
+      block.cells = newCells;
+      // Clamp the cursor inside the new bounds.
+      cursor.r = clamp(cursor.r, 0, block.rows - 1);
+      cursor.c = clamp(cursor.c, 0, block.cols - 1);
+      if (cursor.slot && !block.cells[`${cursor.r},${cursor.c}`]) {
+        cursor.slot = null;
+      }
+      await savePage(page);
+      await renderBlocks();
+    };
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+
+    wrapper.appendChild(handle);
   }
 
   let dragState = null;
@@ -572,25 +645,8 @@ export async function mountEditor(root, notebookId) {
       revokeBlobUrl(block.blobId);
       await deleteBlob(block.blobId);
     }
-    if (focusedTextarea && focusedTextarea.dataset.blockId === blockId) {
-      focusedTextarea = null;
-    }
     await savePage(page);
     await renderBlocks();
-  }
-
-  async function addTextBlock() {
-    const text = newTextBlock();
-    page.blocks.push(text);
-    await savePage(page);
-    await renderBlocks();
-    // Focus the new textarea so the user can start typing immediately.
-    requestAnimationFrame(() => {
-      const ta = pageHost.querySelector(
-        `[data-block-id="${text.id}"] .textblock__input`
-      );
-      if (ta) ta.focus();
-    });
   }
 
   async function addWorkBlock() {
@@ -813,45 +869,31 @@ export async function mountEditor(root, notebookId) {
   // Hebrew keypad presses target the focused textarea. If nothing is
   // focused, refocus the most recently used one (or the first text block on
   // the page) so the first press doesn't silently drop.
+  // Hebrew presses go into the same work-block grid the math keypad targets
+  // — one Hebrew letter per cell. SPACE just advances the cursor (a literal
+  // ' ' in a cell would erase it via the empty-ch path), NEWLINE drops to
+  // the next row's first column, BACKSPACE / arrows reuse the math handlers.
   function handleHebrewKey(code) {
-    let ta = focusedTextarea;
-    if (!ta || !document.body.contains(ta)) {
-      ta = pageHost.querySelector('.textblock__input');
-      if (ta) ta.focus();
-      focusedTextarea = ta;
+    if (code === 'TOGGLE_KEYPAD') {
+      setKeypadMode('math');
+      return;
     }
-    if (!ta) return;
-    const { selectionStart, selectionEnd, value } = ta;
-    const start = selectionStart != null ? selectionStart : value.length;
-    const end = selectionEnd != null ? selectionEnd : value.length;
-
-    if (code === 'BACKSPACE') {
-      if (start === end && start > 0) {
-        ta.value = value.slice(0, start - 1) + value.slice(end);
-        ta.selectionStart = ta.selectionEnd = start - 1;
-      } else if (start !== end) {
-        ta.value = value.slice(0, start) + value.slice(end);
-        ta.selectionStart = ta.selectionEnd = start;
-      }
-    } else {
-      let insert;
-      if (code === 'SPACE') insert = ' ';
-      else if (code === 'NEWLINE') insert = '\n';
-      else insert = code;
-      ta.value = value.slice(0, start) + insert + value.slice(end);
-      ta.selectionStart = ta.selectionEnd = start + insert.length;
+    if (!activeWorkBlock) return;
+    switch (code) {
+      case 'BACKSPACE': backspace(); return;
+      case 'SPACE': moveCursor(cursor.r, cursor.c + 1); return;
+      case 'NEWLINE': moveCursor(cursor.r + 1, 0); return;
+      default:
+        // Single Hebrew letter or punctuation — insert as a one-char atom.
+        insertChar(code);
     }
-
-    // Sync the model + autosize + persist.
-    const blockId = ta.dataset.blockId;
-    const block = page.blocks.find((b) => b.id === blockId);
-    if (block) block.content = ta.value;
-    ta.style.height = 'auto';
-    ta.style.height = ta.scrollHeight + 'px';
-    queueSave();
   }
 
   function handleKey(code) {
+    if (code === 'TOGGLE_KEYPAD') {
+      setKeypadMode('hebrew');
+      return;
+    }
     if (!activeWorkBlock) return;
     if (CHAR_KEYS.has(code)) {
       insertChar(code);
@@ -1247,6 +1289,9 @@ export async function mountEditor(root, notebookId) {
       cursor,
       onCellTap: (r, c) => moveCursor(r, c)
     });
+    // Reattach drag + resize handles. Without this they vanish whenever a
+    // fraction widens (or any other in-place rerender).
+    attachBlockChrome(newWrapper, activeWorkBlock);
     parent.replaceChild(newWrapper, wrapper);
     activeGrid = newGrid;
   }
