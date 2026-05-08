@@ -1,19 +1,41 @@
 // Math keypad. Each press calls onKey(code) where code is one of:
 //   character keys (single-char atoms): '0'-'9', '+', '−', '×', '÷', '=',
 //                                       '.', '(', ')', 'x', 'y', 'a', 'b',
-//                                       '<', '>', '≤', '≥'
-//   composite-creating keys: 'FRAC', 'POW', 'SQRT'
-//   actions: 'BACKSPACE', 'LEFT', 'RIGHT', 'UP', 'DOWN', 'EXIT'
+//                                       '<', '>'
+//   composite-creating keys: 'FRAC', 'POW', 'SQRT', 'SQUARE', 'NROOT'
+//   actions: 'BACKSPACE', 'LEFT', 'RIGHT', 'UP', 'DOWN', 'EXIT', 'SPACE',
+//            'TOGGLE_KEYPAD'
 //
-// The keypad renders as a row of independent SECTIONS, each its own CSS grid.
-// This is what gives the digits a clean 3x3 (with 0 centered below) and the
-// arrows a true symmetric cross — flexbox alone couldn't keep the columns
-// aligned across rows.
+// The visible keypad is split into two regions: a top row of grid SECTIONS
+// (variables/algebra, digits, vertical ops column, arrows+specials) and a
+// bottom action bar (mode-switch, space, backspace) that spans the full
+// keypad width. EXIT is kept as an action code so the physical keyboard's
+// Enter/Escape still escapes a fraction/exponent — there's just no on-screen
+// button for it any more.
 
 // Each section: { name, cols, keys }. keys is a flat list, row-major; null
 // is a placeholder (renders as an invisible button so the grid keeps its
-// column structure).
+// column structure). A button can set `span` to occupy multiple grid columns
+// (used for the wide ↑/↓ keys that sit above and below ←→).
 const SECTIONS = [
+  {
+    name: 'vars',
+    cols: 3,
+    keys: [
+      { code: 'SQUARE', label: 'a²', kind: 'comp', title: 'בריבוע' },
+      { code: 'POW', label: 'aᵇ', kind: 'comp', title: 'חזקה' },
+      { code: 'a', label: 'a', kind: 'var' },
+      { code: 'SQRT', label: '√', kind: 'comp', title: 'שורש' },
+      { code: 'NROOT', label: 'ⁿ√', kind: 'comp', title: 'שורש n-י' },
+      { code: 'b', label: 'b', kind: 'var' },
+      { code: '<', label: '<', kind: 'op' },
+      { code: '>', label: '>', kind: 'op' },
+      { code: 'x', label: 'x', kind: 'var' },
+      { code: '(', label: '(', kind: 'op' },
+      { code: ')', label: ')', kind: 'op' },
+      { code: 'y', label: 'y', kind: 'var' }
+    ]
+  },
   {
     name: 'digits',
     cols: 3,
@@ -27,72 +49,79 @@ const SECTIONS = [
       { code: '1', label: '1' },
       { code: '2', label: '2' },
       { code: '3', label: '3' },
-      null,
       { code: '0', label: '0' },
-      null
+      { code: '.', label: '.', title: 'נקודה עשרונית' },
+      { code: '=', label: '=', kind: 'op' }
     ]
   },
   {
     name: 'ops',
-    cols: 4,
+    cols: 1,
     keys: [
-      { code: '+', label: '+', kind: 'op' },
-      { code: '−', label: '−', kind: 'op' },
-      { code: '×', label: '×', kind: 'op' },
       { code: '÷', label: '÷', kind: 'op' },
-      { code: '(', label: '(', kind: 'op' },
-      { code: ')', label: ')', kind: 'op' },
-      { code: '.', label: '·', kind: 'op', title: 'נקודה עשרונית' },
-      { code: '=', label: '=', kind: 'op' },
-      { code: '<', label: '<', kind: 'op' },
-      { code: '>', label: '>', kind: 'op' },
-      { code: '≤', label: '≤', kind: 'op' },
-      { code: '≥', label: '≥', kind: 'op' },
-      { code: 'x', label: 'x', kind: 'var' },
-      { code: 'y', label: 'y', kind: 'var' },
-      { code: 'a', label: 'a', kind: 'var' },
-      { code: 'b', label: 'b', kind: 'var' }
-    ]
-  },
-  {
-    name: 'composites',
-    cols: 3,
-    keys: [
-      { code: 'FRAC', label: '½', kind: 'comp', title: 'שבר' },
-      { code: 'POW', label: 'xⁿ', kind: 'comp', title: 'חזקה' },
-      { code: 'SQRT', label: '√', kind: 'comp', title: 'שורש' },
-      { code: '%', label: '%', kind: 'op' },
-      { code: 'EXIT', label: '⏎', kind: 'edit', title: 'יציאה משבר/חזקה' },
-      { code: 'TOGGLE_KEYPAD', label: 'אבג', kind: 'mode', title: 'מקלדת עברית' }
+      { code: '×', label: '×', kind: 'op' },
+      { code: '−', label: '−', kind: 'op' },
+      { code: '+', label: '+', kind: 'op' }
     ]
   },
   {
     name: 'arrows',
-    cols: 3,
+    cols: 2,
     keys: [
-      null,
-      { code: 'UP', label: '↑', kind: 'nav' },
-      null,
+      { code: '%', label: '%', kind: 'op' },
+      { code: 'FRAC', label: 'a/b', kind: 'comp', title: 'שבר' },
+      { code: 'UP', label: '↑', kind: 'nav', span: 2 },
       { code: 'LEFT', label: '←', kind: 'nav' },
-      { code: 'DOWN', label: '↓', kind: 'nav' },
       { code: 'RIGHT', label: '→', kind: 'nav' },
-      null,
-      { code: 'BACKSPACE', label: '⌫', kind: 'edit' },
-      null
+      { code: 'DOWN', label: '↓', kind: 'nav', span: 2 }
     ]
   }
 ];
 
 export function renderKeypad({ onKey }) {
   const wrapper = document.createElement('div');
-  wrapper.className = 'keypad keypad--sectioned';
+  wrapper.className = 'keypad keypad--math';
   wrapper.setAttribute('dir', 'ltr');
 
+  const sectionsRow = document.createElement('div');
+  sectionsRow.className = 'keypad__sections';
   for (const section of SECTIONS) {
-    wrapper.appendChild(buildSection(section, onKey));
+    sectionsRow.appendChild(buildSection(section, onKey));
   }
+  wrapper.appendChild(sectionsRow);
+
+  // Bottom action bar: mode-toggle on the left, very wide Space in the
+  // middle, backspace on the right — same shape on both math and Hebrew
+  // keypads so the muscle memory carries between modes.
+  const bottom = document.createElement('div');
+  bottom.className = 'keypad__bottom';
+  bottom.appendChild(makeKey(modeKey('מקלדת עברית'), onKey));
+  bottom.appendChild(makeKey({
+    code: 'SPACE',
+    label: 'Space',
+    kind: 'space'
+  }, onKey));
+  bottom.appendChild(makeKey({
+    code: 'BACKSPACE',
+    label: '⌫',
+    kind: 'edit',
+    title: 'מחק'
+  }, onKey));
+  wrapper.appendChild(bottom);
 
   return wrapper;
+}
+
+// Stacked "ABC / 123" mode-switch button — matches the iPadOS look so the
+// kid recognises it as a keyboard-mode toggle rather than a character key.
+export function modeKey(title) {
+  return {
+    code: 'TOGGLE_KEYPAD',
+    kind: 'mode',
+    title,
+    html: '<span class="keypad__mode-top">ABC</span>'
+        + '<span class="keypad__mode-bot">123</span>'
+  };
 }
 
 export function buildSection(section, onKey) {
@@ -111,13 +140,15 @@ export function buildSection(section, onKey) {
   return el;
 }
 
-function makeKey(button, onKey) {
+export function makeKey(button, onKey) {
   const el = document.createElement('button');
   el.className = `keypad__key ${button.kind ? `keypad__key--${button.kind}` : ''}`;
   el.type = 'button';
-  el.textContent = button.label;
+  if (button.html) el.innerHTML = button.html;
+  else el.textContent = button.label;
   el.dataset.code = button.code;
   if (button.title) el.title = button.title;
+  if (button.span) el.style.gridColumn = `span ${button.span}`;
   el.addEventListener('mousedown', (e) => e.preventDefault());
   el.addEventListener('click', () => onKey(button.code));
   return el;
@@ -145,6 +176,7 @@ export function keyboardEventToCode(event) {
     case '%': return '%';
     case '<': return '<';
     case '>': return '>';
+    case ' ': return 'SPACE';
     case 'Backspace':
     case 'Delete': return 'BACKSPACE';
     case 'ArrowLeft': return 'LEFT';

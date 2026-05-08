@@ -27,7 +27,8 @@ import {
   findOccupyingAnchor,
   newFractionCell,
   newPowCell,
-  newSqrtCell
+  newSqrtCell,
+  newNRootCell
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
 import {
@@ -50,7 +51,7 @@ const CHAR_KEYS = new Set([
   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
   '+', '−', '×', '÷', '=', '.', '(', ')', '%',
   'x', 'y', 'a', 'b',
-  '<', '>', '≤', '≥'
+  '<', '>'
 ]);
 
 // Inside a fraction slot we can't open a nested composite (slots are plain
@@ -66,7 +67,13 @@ const SUPERSCRIPT_NEXT = new Map(
 const COMPOSITE_KEYS = {
   FRAC: () => newFractionCell(),
   POW: () => newPowCell(),
-  SQRT: () => newSqrtCell()
+  // a² shortcut — pre-fills the exponent so the kid doesn't have to type
+  // '2' after every square. Treated like POW for promotion of an adjacent
+  // atom into the base; insertComposite skips entering the exp slot when
+  // exp is already filled (see special-case in insertComposite).
+  SQUARE: () => newPowCell('', '2'),
+  SQRT: () => newSqrtCell(),
+  NROOT: () => newNRootCell()
 };
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -1011,6 +1018,9 @@ export async function mountEditor(root, notebookId) {
       case 'UP': arrowVertical(-1); break;
       case 'DOWN': arrowVertical(1); break;
       case 'EXIT': exitComposite(1); break;
+      // Space in math mode advances the cursor right — it doesn't insert a
+      // visible space character, since math cells are single atoms.
+      case 'SPACE': arrowHorizontal(1); break;
     }
   }
 
@@ -1148,23 +1158,32 @@ export async function mountEditor(root, notebookId) {
     //  - cursor is on an empty cell with an atom immediately to its left
     //    (the typical "type x, then xⁿ" flow)
     //  - cursor sits ON an atom (user navigated back onto it)
+    // SQUARE arrives here as a pow template with exp pre-filled to '2'.
+    // When that's the case we keep the pre-fill and skip entering the exp
+    // slot so the cursor lands ready for the next atom.
     if (template.type === 'pow') {
+      const presetExp = template.exp || '';
+      const enterSlot = presetExp ? null : 'exp';
       const here = getCellAt(r, c);
       if (here && here.ch != null) {
-        const promoted = { type: 'pow', base: here.ch, exp: '' };
+        const promoted = { type: 'pow', base: here.ch, exp: presetExp };
         activeWorkBlock.cells[`${r},${c}`] = promoted;
         updateCell(activeGrid, activeWorkBlock, r, c);
-        moveCursorTo(r, c, 'exp');
+        if (enterSlot) moveCursorTo(r, c, enterSlot);
+        else if (c + 1 < activeWorkBlock.cols) moveCursor(r, c + 1);
         queueSave();
         return;
       }
       if (c > 0) {
         const prev = getCellAt(r, c - 1);
         if (prev && prev.ch != null) {
-          const promoted = { type: 'pow', base: prev.ch, exp: '' };
+          const promoted = { type: 'pow', base: prev.ch, exp: presetExp };
           activeWorkBlock.cells[`${r},${c - 1}`] = promoted;
           updateCell(activeGrid, activeWorkBlock, r, c - 1);
-          moveCursorTo(r, c - 1, 'exp');
+          if (enterSlot) moveCursorTo(r, c - 1, enterSlot);
+          // No prev-atom advance for SQUARE: the cursor already sits at c
+          // (just past the promoted base), which is exactly where the next
+          // character should land.
           queueSave();
           return;
         }
@@ -1300,6 +1319,11 @@ export async function mountEditor(root, notebookId) {
         // exp is "above" base in display: ↑ in base → exp; ↓ in exp → base.
         if (dir < 0) nextIdx = idx === 0 ? 1 : -1;
         else nextIdx = idx === 1 ? 0 : -1;
+      } else if (cell.type === 'nroot') {
+        // index sits as a superscript on the √ (above the radicand line):
+        // ↑ in radicand → index; ↓ in index → radicand.
+        if (dir < 0) nextIdx = idx === 1 ? 0 : -1;
+        else nextIdx = idx === 0 ? 1 : -1;
       }
       // sqrt/abs (single slot) always exit on ↑/↓.
 
