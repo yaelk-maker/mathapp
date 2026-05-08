@@ -13,7 +13,7 @@ import {
 } from '../page-model.js';
 
 export function renderWorkBlock(block, options = {}) {
-  const { onCellTap, cursor } = options;
+  const { onCellTap, cursor, onDelete } = options;
 
   const wrapper = document.createElement('div');
   wrapper.className = 'workblock';
@@ -68,6 +68,25 @@ export function renderWorkBlock(block, options = {}) {
   }
 
   wrapper.appendChild(grid);
+
+  // Delete button only renders when the caller supplies an onDelete — the
+  // editor passes it only for non-last work blocks so the kid can never
+  // delete their way into a notebook with no place to type.
+  if (onDelete) {
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'workblock__delete';
+    del.textContent = '✕';
+    del.title = 'הסר אזור פתרון';
+    del.setAttribute('aria-label', 'הסר אזור פתרון');
+    del.addEventListener('mousedown', (e) => e.preventDefault());
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onDelete(block.id);
+    });
+    wrapper.appendChild(del);
+  }
+
   return { wrapper, grid };
 }
 

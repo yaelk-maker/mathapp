@@ -332,6 +332,10 @@ export async function mountEditor(root, notebookId) {
     pageHost.innerHTML = '';
     activeGrid = null;
     activeWorkBlock = null;
+    // Only allow deleting a work block if there's at least one other to fall
+    // back to — protects the kid from ending up with no grid at all.
+    const workBlockCount = page.blocks.filter((b) => b.type === BLOCK.WORK).length;
+    const canDeleteWork = workBlockCount > 1;
     for (const block of page.blocks) {
       let el = null;
       if (block.type === BLOCK.WORKSHEET) {
@@ -351,7 +355,8 @@ export async function mountEditor(root, notebookId) {
             }
             if (keypadMode !== 'math') setKeypadMode('math');
             moveCursor(r, c);
-          }
+          },
+          onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
         });
         el = wrapper;
         if (!activeWorkBlock) {
@@ -366,6 +371,20 @@ export async function mountEditor(root, notebookId) {
         attachBlockChrome(el, block);
         pageHost.appendChild(el);
       }
+    }
+    // The previously active work block may have been deleted or resized;
+    // clamp the cursor so it always lands on a real cell of whichever
+    // block is now active.
+    if (activeWorkBlock) {
+      cursor.r = clamp(cursor.r, 0, activeWorkBlock.rows - 1);
+      cursor.c = clamp(cursor.c, 0, activeWorkBlock.cols - 1);
+      const anchor = findOccupyingAnchor(activeWorkBlock, cursor.r, cursor.c);
+      if (anchor) { cursor.r = anchor.r; cursor.c = anchor.c; }
+      if (cursor.slot && !activeWorkBlock.cells[`${cursor.r},${cursor.c}`]) {
+        cursor.slot = null;
+      }
+    } else {
+      cursor.slot = null;
     }
     // Allow layout to settle, then resize the canvas to match content.
     requestAnimationFrame(() => resizeAndReplay());
@@ -605,7 +624,11 @@ export async function mountEditor(root, notebookId) {
   async function removeBlock(blockId) {
     const block = page.blocks.find((b) => b.id === blockId);
     if (!block) return;
-    if (!window.confirm('להסיר את הדף הזה? המשבצות שלמטה יישמרו.')) return;
+    const confirmText =
+      block.type === BLOCK.WORK
+        ? 'להסיר את אזור הפתרון הזה?'
+        : 'להסיר את הדף הזה?';
+    if (!window.confirm(confirmText)) return;
 
     // Delete any strokes that belong to this block. Strokes anchored to the
     // block by id (the modern path) are removed directly. Legacy unanchored
@@ -1285,9 +1308,12 @@ export async function mountEditor(root, notebookId) {
     const wrapper = activeGrid.parentElement; // .workblock
     if (!wrapper || !wrapper.parentElement) return;
     const parent = wrapper.parentElement;
+    const workBlockCount = page.blocks.filter((b) => b.type === BLOCK.WORK).length;
+    const canDeleteWork = workBlockCount > 1;
     const { wrapper: newWrapper, grid: newGrid } = renderWorkBlock(activeWorkBlock, {
       cursor,
-      onCellTap: (r, c) => moveCursor(r, c)
+      onCellTap: (r, c) => moveCursor(r, c),
+      onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
     });
     // Reattach drag + resize handles. Without this they vanish whenever a
     // fraction widens (or any other in-place rerender).
