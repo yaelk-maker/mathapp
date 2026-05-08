@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v3';
+const CACHE = 'mathapp-shell-v4';
 const SHELL = [
   './',
   './index.html',
@@ -10,7 +10,9 @@ const SHELL = [
   './js/page-model.js',
   './js/render/grid.js',
   './js/render/worksheet.js',
+  './js/render/strokes.js',
   './js/input/keypad.js',
+  './js/input/pencil.js',
   './js/io/import.js',
   './vendor/idb.js',
   './icons/icon-180.png',

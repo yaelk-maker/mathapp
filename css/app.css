@@ -194,8 +194,73 @@ h1 {
   gap: 8px;
   margin-bottom: 8px;
   flex-wrap: wrap;
+  align-items: center;
 }
 .editor__actions .btn { font-size: 14px; padding: 8px 14px; }
+.editor__sep {
+  width: 1px;
+  height: 28px;
+  background: var(--border);
+  margin: 0 4px;
+  display: inline-block;
+}
+.btn--active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.pen-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pen-tools[hidden] { display: none; }
+
+.pen-color {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid #d8d8d8;
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.05s ease;
+}
+.pen-color--active {
+  border-color: var(--fg);
+  transform: scale(1.1);
+  box-shadow: 0 0 0 2px white, 0 0 0 4px var(--accent);
+}
+.pen-color:active { transform: scale(0.95); }
+
+/* --- Pencil canvas overlay --- */
+
+.editor__page-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.editor__page-wrap .editor__page {
+  flex: none;
+  height: 100%;
+}
+
+.pencil-canvas {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  pointer-events: none;
+  z-index: 5;
+  /* Disable touch panning on the canvas; lets pen events through cleanly. */
+  touch-action: none;
+}
+
+.pencil-canvas--active {
+  pointer-events: auto;
+}
 
 .editor--full .editor__page {
   flex: 1 1 auto;

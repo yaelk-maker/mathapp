@@ -1,13 +1,21 @@
 // Notebook editor: a page is a vertical flow of blocks (worksheet images and
 // work-grid blocks). The grid is a property of WorkBlocks only — it CANNOT
 // bleed under a worksheet image. That is the architectural fix vs. ModMath.
+//
+// Phase 4 adds an Apple Pencil drawing layer: a single canvas overlay covers
+// the entire page area so strokes can cross between worksheet and grid blocks.
+// Strokes are stored per-page in IndexedDB.
 
 import {
   listPages,
   getNotebook,
   savePage,
   renameNotebook,
-  deleteBlob
+  deleteBlob,
+  listStrokesByPage,
+  addStroke,
+  deleteStrokeById,
+  clearStrokesForPage
 } from './db.js';
 import { BLOCK, newWorkBlock } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
@@ -16,8 +24,15 @@ import {
   revokeWorksheetUrls,
   revokeBlobUrl
 } from './render/worksheet.js';
+import {
+  sizeCanvas,
+  renderStroke,
+  renderStrokeIncremental,
+  replayStrokes
+} from './render/strokes.js';
 import { renderKeypad, keyboardEventToCode } from './input/keypad.js';
 import { uploadWorksheet } from './io/import.js';
+import { attachPencilSurface } from './input/pencil.js';
 
 const CHAR_KEYS = new Set([
   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
@@ -25,6 +40,8 @@ const CHAR_KEYS = new Set([
 ]);
 
 const SAVE_DEBOUNCE_MS = 300;
+
+const PEN_COLORS = ['#111111', '#0b6cf2', '#d12d2d', '#1f9c4a', '#e6a700'];
 
 export async function mountEditor(root, notebookId) {
   const nb = await getNotebook(notebookId);
@@ -39,8 +56,6 @@ export async function mountEditor(root, notebookId) {
   }
   const page = pages[0];
 
-  // Ensure the page has a work block. Phase 1 created empty pages; Phase 2+
-  // requires a grid to write in.
   if (!page.blocks.some((b) => b.type === BLOCK.WORK)) {
     page.blocks.push(newWorkBlock());
     await savePage(page);
@@ -49,6 +64,18 @@ export async function mountEditor(root, notebookId) {
   const cursor = { r: 0, c: 0 };
   let activeWorkBlock = page.blocks.find((b) => b.type === BLOCK.WORK);
   let activeGrid = null;
+
+  // Drawing state
+  const strokes = await listStrokesByPage(page.id);
+  let pencilEnabled = false;
+  let eraserMode = false;
+  let penColor = PEN_COLORS[0];
+  let penWidth = 2.4;
+  let canvas = null;
+  let ctx = null;
+  let detachPencil = null;
+  const liveStrokes = new Map(); // strokeId -> stroke being drawn
+  let liveDrawnPointCount = new Map(); // strokeId -> last drawn index
 
   root.innerHTML = `
     <div class="editor editor--full">
@@ -60,8 +87,22 @@ export async function mountEditor(root, notebookId) {
       <div class="editor__actions">
         <button class="btn btn--ghost" id="upload-photo">📷 צלם דף</button>
         <button class="btn btn--ghost" id="upload-library">🖼️ בחר תמונה</button>
+        <span class="editor__sep"></span>
+        <button class="btn btn--ghost" id="toggle-pen">✏️ ציור</button>
+        <span class="pen-tools" id="pen-tools" hidden>
+          ${PEN_COLORS.map(
+            (c, i) => `<button class="pen-color ${i === 0 ? 'pen-color--active' : ''}"
+              style="background:${c}" data-color="${c}" aria-label="צבע"></button>`
+          ).join('')}
+          <button class="btn btn--ghost" id="toggle-eraser">🧽 מחק</button>
+          <button class="btn btn--ghost" id="undo-stroke">↶ בטל</button>
+          <button class="btn btn--ghost" id="clear-strokes">🗑️ נקה ציורים</button>
+        </span>
       </div>
-      <div class="editor__page" id="page"></div>
+      <div class="editor__page-wrap">
+        <div class="editor__page" id="page"></div>
+        <canvas class="pencil-canvas" id="pencil-canvas"></canvas>
+      </div>
       <div class="editor__keypad-host" id="keypad-host"></div>
     </div>
   `;
@@ -70,6 +111,7 @@ export async function mountEditor(root, notebookId) {
   document.getElementById('back-home').addEventListener('click', () => {
     flushSave();
     revokeWorksheetUrls();
+    detachPencilIfAny();
     window.location.hash = '';
   });
   document.getElementById('rename').addEventListener('click', async () => {
@@ -87,15 +129,51 @@ export async function mountEditor(root, notebookId) {
     addWorksheet({ capture: false })
   );
 
+  // Pencil toolbar wiring
+  const penToolsEl = document.getElementById('pen-tools');
+  const penToggleBtn = document.getElementById('toggle-pen');
+  penToggleBtn.addEventListener('click', () => {
+    pencilEnabled = !pencilEnabled;
+    penToggleBtn.classList.toggle('btn--active', pencilEnabled);
+    penToolsEl.hidden = !pencilEnabled;
+    canvas.classList.toggle('pencil-canvas--active', pencilEnabled);
+  });
+
+  document.getElementById('toggle-eraser').addEventListener('click', (e) => {
+    eraserMode = !eraserMode;
+    e.currentTarget.classList.toggle('btn--active', eraserMode);
+  });
+
+  document.getElementById('undo-stroke').addEventListener('click', undoLastStroke);
+  document.getElementById('clear-strokes').addEventListener('click', clearAllStrokes);
+
+  for (const swatch of penToolsEl.querySelectorAll('.pen-color')) {
+    swatch.addEventListener('click', () => {
+      penColor = swatch.dataset.color;
+      penToolsEl
+        .querySelectorAll('.pen-color')
+        .forEach((s) => s.classList.toggle('pen-color--active', s === swatch));
+    });
+  }
+
   const pageHost = document.getElementById('page');
+  canvas = document.getElementById('pencil-canvas');
+  ctx = canvas.getContext('2d');
 
   await renderBlocks();
 
   const keypad = renderKeypad({ onKey: handleKey });
   document.getElementById('keypad-host').appendChild(keypad);
 
+  // Set up pencil surface and replay existing strokes
+  setupPencilSurface();
+  resizeAndReplay();
+
+  const resizeObserver = new ResizeObserver(() => resizeAndReplay());
+  resizeObserver.observe(pageHost);
+  window.addEventListener('resize', resizeAndReplay);
+
   const keydownHandler = (event) => {
-    // Don't intercept if user is typing into a real input/dialog.
     const tag = (event.target && event.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     const code = keyboardEventToCode(event);
@@ -107,6 +185,9 @@ export async function mountEditor(root, notebookId) {
 
   const cleanup = () => {
     document.removeEventListener('keydown', keydownHandler);
+    window.removeEventListener('resize', resizeAndReplay);
+    resizeObserver.disconnect();
+    detachPencilIfAny();
     flushSave();
     revokeWorksheetUrls();
     window.removeEventListener('hashchange', cleanup);
@@ -131,13 +212,14 @@ export async function mountEditor(root, notebookId) {
           onCellTap: (r, c) => moveCursor(r, c)
         });
         pageHost.appendChild(wrapper);
-        // Cache the first work block as the active one for input.
         if (!activeWorkBlock) {
           activeWorkBlock = block;
           activeGrid = grid;
         }
       }
     }
+    // Allow layout to settle, then resize the canvas to match content.
+    requestAnimationFrame(() => resizeAndReplay());
   }
 
   // ---------- worksheet add / remove ----------
@@ -145,8 +227,6 @@ export async function mountEditor(root, notebookId) {
   async function addWorksheet({ capture }) {
     const ws = await uploadWorksheet({ capture });
     if (!ws) return;
-    // Insert worksheet BEFORE the first work block (so worksheet sits at top,
-    // work area below). Falls back to "prepend" if no work block found.
     const workIndex = page.blocks.findIndex((b) => b.type === BLOCK.WORK);
     if (workIndex < 0) page.blocks.push(ws);
     else page.blocks.splice(workIndex, 0, ws);
@@ -165,6 +245,101 @@ export async function mountEditor(root, notebookId) {
     }
     await savePage(page);
     await renderBlocks();
+  }
+
+  // ---------- pencil drawing ----------
+
+  function setupPencilSurface() {
+    detachPencilIfAny();
+    detachPencil = attachPencilSurface(canvas, {
+      isEnabled: () => pencilEnabled,
+      // On desktop, mouse drawing is allowed (for testing). Touch (finger)
+      // is always rejected — Pencil-only is the iPad UX.
+      allowFinger: false,
+      getColor: () => penColor,
+      getWidth: () => penWidth,
+      getEraserMode: () => eraserMode,
+      onStrokeStart: ({ color, width, eraser, point }) => {
+        const id = `stroke_${Date.now().toString(36)}_${Math.random()
+          .toString(36)
+          .slice(2, 6)}`;
+        const stroke = {
+          id,
+          pageId: page.id,
+          color,
+          width,
+          eraser,
+          points: [point],
+          createdAt: Date.now()
+        };
+        liveStrokes.set(id, stroke);
+        liveDrawnPointCount.set(id, 0);
+        strokes.push(stroke);
+        // Render the initial dot
+        const dpr = window.devicePixelRatio || 1;
+        renderStroke(ctx, stroke, dpr);
+        liveDrawnPointCount.set(id, 1);
+        return id;
+      },
+      onStrokePoint: (id, point) => {
+        const stroke = liveStrokes.get(id);
+        if (!stroke) return;
+        stroke.points.push(point);
+        const from = liveDrawnPointCount.get(id) || 0;
+        const dpr = window.devicePixelRatio || 1;
+        renderStrokeIncremental(ctx, stroke, from, dpr);
+        liveDrawnPointCount.set(id, stroke.points.length);
+      },
+      onStrokeEnd: async (id) => {
+        const stroke = liveStrokes.get(id);
+        if (!stroke) return;
+        liveStrokes.delete(id);
+        liveDrawnPointCount.delete(id);
+        try {
+          await addStroke(stroke);
+        } catch (err) {
+          console.error('Failed to save stroke:', err);
+        }
+      }
+    });
+  }
+
+  function detachPencilIfAny() {
+    if (detachPencil) {
+      detachPencil();
+      detachPencil = null;
+    }
+  }
+
+  function resizeAndReplay() {
+    if (!canvas || !pageHost) return;
+    const wasEnabled = pencilEnabled;
+    sizeCanvas(canvas, pageHost);
+    replayStrokes(canvas, strokes);
+    // Keep the canvas's pointer-events state in sync with mode.
+    canvas.classList.toggle('pencil-canvas--active', wasEnabled);
+  }
+
+  async function undoLastStroke() {
+    // Pop the most recently created non-live stroke.
+    if (strokes.length === 0) return;
+    const last = strokes[strokes.length - 1];
+    if (liveStrokes.has(last.id)) return; // currently being drawn
+    strokes.pop();
+    try {
+      await deleteStrokeById(last.id);
+    } catch (err) {
+      console.error('Undo delete failed:', err);
+    }
+    replayStrokes(canvas, strokes);
+  }
+
+  async function clearAllStrokes() {
+    if (strokes.length === 0) return;
+    if (!window.confirm('למחוק את כל הציורים בדף הזה?')) return;
+    strokes.length = 0;
+    await clearStrokesForPage(page.id);
+    replayStrokes(canvas, strokes);
   }
 
   // ---------- input dispatch ----------

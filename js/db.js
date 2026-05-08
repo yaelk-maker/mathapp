@@ -145,6 +145,31 @@ export async function deleteBlob(id) {
   await db.delete('blobs', id);
 }
 
+export async function listStrokesByPage(pageId) {
+  const db = await getDB();
+  const strokes = await db.getAllFromIndex('strokes', 'byPage', pageId);
+  return strokes.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export async function addStroke(stroke) {
+  const db = await getDB();
+  await db.put('strokes', stroke);
+  return stroke;
+}
+
+export async function deleteStrokeById(id) {
+  const db = await getDB();
+  await db.delete('strokes', id);
+}
+
+export async function clearStrokesForPage(pageId) {
+  const db = await getDB();
+  const strokes = await db.getAllFromIndex('strokes', 'byPage', pageId);
+  await runInTransaction(db, ['strokes'], 'readwrite', (tx) => {
+    for (const s of strokes) tx.objectStore('strokes').delete(s.id);
+  });
+}
+
 export async function requestPersistentStorage() {
   if (!('storage' in navigator) || !navigator.storage.persist) return false;
   try {
