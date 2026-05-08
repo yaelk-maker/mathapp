@@ -123,7 +123,7 @@ export async function mountEditor(root, notebookId) {
         </span>
       </div>
       <div class="editor__page" id="page-scroll">
-        <div class="pen-mode-indicator">✏️ מצב ציור — צייר עם העט</div>
+        <div class="pen-mode-indicator">✏️ מצב ציור פעיל</div>
         <div class="editor__page-content" id="page-content">
           <div id="page"></div>
           <canvas class="pencil-canvas" id="pencil-canvas"></canvas>
@@ -325,9 +325,12 @@ export async function mountEditor(root, notebookId) {
     detachPencilIfAny();
     detachPencil = attachPencilSurface(canvas, {
       isEnabled: () => pencilEnabled,
-      // On desktop, mouse drawing is allowed (for testing). Touch (finger)
-      // is always rejected — Pencil-only is the iPad UX.
-      allowFinger: false,
+      // Drawing is gated entirely by pen-mode toggle. When pen mode is OFF
+      // the canvas has pointer-events: none and finger taps fall through
+      // to the grid for typing. When pen mode is ON, ANY pointer (Apple
+      // Pencil, finger, or mouse on desktop) draws — needed because not
+      // every kid has a Pencil.
+      allowFinger: true,
       getColor: () => penColor,
       getWidth: () => penWidth,
       getEraserMode: () => eraserMode,
