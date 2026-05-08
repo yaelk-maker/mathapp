@@ -1,7 +1,9 @@
-// Renders a WorkBlock as a CSS-grid. Every cell is 1 character, gridlines
-// always visible. Math is LTR even when the page UI is RTL.
+// Renders a WorkBlock as a CSS-grid. Every cell is 1 logical position.
+// Atoms hold one character. Composite cells (fractions, exponents, sqrt, abs)
+// render with custom inner DOM but still occupy exactly one grid position.
+// Math is LTR even when the page UI is RTL.
 
-import { getCell, cellKey } from '../page-model.js';
+import { getCell, cellKey, isComposite, compositeSlots } from '../page-model.js';
 
 export function renderWorkBlock(block, options = {}) {
   const { onCellTap, cursor } = options;
@@ -24,11 +26,10 @@ export function renderWorkBlock(block, options = {}) {
       cell.dataset.c = c;
 
       const value = getCell(block, r, c);
-      if (value && value.ch) cell.textContent = value.ch;
+      const isCursor = cursor && cursor.r === r && cursor.c === c;
+      paintCell(cell, value, isCursor ? cursor.slot : null);
 
-      if (cursor && cursor.r === r && cursor.c === c) {
-        cell.classList.add('cell--cursor');
-      }
+      if (isCursor) cell.classList.add('cell--cursor');
 
       grid.appendChild(cell);
     }
@@ -48,29 +49,108 @@ export function renderWorkBlock(block, options = {}) {
   return { wrapper, grid };
 }
 
-// Targeted updates to avoid re-rendering the whole grid on every keystroke.
-
-export function updateCell(grid, block, r, c) {
+export function updateCell(grid, block, r, c, activeSlot = null) {
   const cell = grid.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
   if (!cell) return;
-  const value = getCell(block, r, c);
-  cell.textContent = value && value.ch ? value.ch : '';
+  paintCell(cell, getCell(block, r, c), activeSlot);
 }
 
-export function updateCursor(grid, prevCursor, nextCursor) {
+export function updateCursor(grid, prevCursor, nextCursor, getCellAt) {
   if (prevCursor) {
     const prev = grid.querySelector(
       `.cell[data-r="${prevCursor.r}"][data-c="${prevCursor.c}"]`
     );
-    if (prev) prev.classList.remove('cell--cursor');
+    if (prev) {
+      prev.classList.remove('cell--cursor');
+      // Clear active-slot highlight from old composite cell
+      if (getCellAt) paintCell(prev, getCellAt(prevCursor.r, prevCursor.c), null);
+    }
   }
   if (nextCursor) {
     const next = grid.querySelector(
       `.cell[data-r="${nextCursor.r}"][data-c="${nextCursor.c}"]`
     );
-    if (next) next.classList.add('cell--cursor');
+    if (next) {
+      next.classList.add('cell--cursor');
+      if (getCellAt) {
+        paintCell(next, getCellAt(nextCursor.r, nextCursor.c), nextCursor.slot || null);
+      }
+    }
   }
 }
 
-// For debugging / future use
-export { cellKey };
+// Render the contents of a single cell DOM node based on the value object.
+function paintCell(cellEl, value, activeSlot) {
+  cellEl.innerHTML = '';
+  cellEl.classList.remove('cell--composite', 'cell--fraction', 'cell--pow', 'cell--sqrt', 'cell--abs');
+
+  if (!value) return;
+
+  if (value.ch != null) {
+    cellEl.textContent = value.ch;
+    return;
+  }
+
+  if (isComposite(value)) {
+    cellEl.classList.add('cell--composite', `cell--${value.type}`);
+    cellEl.appendChild(buildCompositeDOM(value, activeSlot));
+  }
+}
+
+function buildCompositeDOM(cell, activeSlot) {
+  const root = document.createElement('span');
+  root.className = `composite composite--${cell.type}`;
+
+  const slot = (name, klass, content, tag = 'span') => {
+    const el = document.createElement(tag);
+    el.className = `composite__${klass}`;
+    if (activeSlot === name) el.classList.add('composite__slot--active');
+    el.textContent = content || ' ';
+    el.dataset.slot = name;
+    return el;
+  };
+
+  switch (cell.type) {
+    case 'fraction': {
+      const num = slot('num', 'num', cell.num);
+      const bar = document.createElement('span');
+      bar.className = 'composite__bar';
+      const den = slot('den', 'den', cell.den);
+      // Tighten font when slot strings get long.
+      const longest = Math.max((cell.num || '').length, (cell.den || '').length);
+      if (longest >= 2) root.classList.add('composite--tight');
+      if (longest >= 3) root.classList.add('composite--very-tight');
+      root.append(num, bar, den);
+      break;
+    }
+    case 'pow': {
+      const base = slot('base', 'base', cell.base);
+      const exp = slot('exp', 'exp', cell.exp, 'sup');
+      root.append(base, exp);
+      break;
+    }
+    case 'sqrt': {
+      const sym = document.createElement('span');
+      sym.className = 'composite__sqrt-sym';
+      sym.textContent = '√';
+      const rad = slot('radicand', 'radicand', cell.radicand);
+      root.append(sym, rad);
+      break;
+    }
+    case 'abs': {
+      const left = document.createElement('span');
+      left.className = 'composite__abs-bar';
+      left.textContent = '|';
+      const inner = slot('inner', 'abs-inner', cell.inner);
+      const right = document.createElement('span');
+      right.className = 'composite__abs-bar';
+      right.textContent = '|';
+      root.append(left, inner, right);
+      break;
+    }
+  }
+
+  return root;
+}
+
+export { cellKey, compositeSlots };

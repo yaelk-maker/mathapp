@@ -374,6 +374,95 @@ h1 {
   z-index: 1;
 }
 
+/* --- Composite cells (Phase 5) --- */
+
+.cell--composite {
+  font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  line-height: 1;
+}
+
+.composite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 1em;
+}
+
+/* Fractions: numerator stacked over denominator with a horizontal bar */
+.composite--fraction {
+  flex-direction: column;
+  font-size: 0.55em;
+}
+.composite--tight { font-size: 0.45em; }
+.composite--very-tight { font-size: 0.36em; }
+.composite__num,
+.composite__den {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1em;
+  padding: 0 0.1em;
+  white-space: nowrap;
+}
+.composite__bar {
+  display: block;
+  width: 80%;
+  height: 1.5px;
+  background: currentColor;
+  margin: 1px 0;
+}
+
+/* Slot highlight when cursor is inside */
+.composite__slot--active {
+  background: rgba(11, 108, 242, 0.18);
+  border-radius: 2px;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Exponent: base + small superscript */
+.composite--pow {
+  align-items: stretch;
+  font-size: 0.85em;
+}
+.composite__base {
+  align-self: flex-end;
+  padding-bottom: 4px;
+}
+.composite__exp {
+  font-size: 0.65em;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+/* Square root: √ symbol with radicand to its right under an overbar */
+.composite--sqrt {
+  font-size: 0.75em;
+}
+.composite__sqrt-sym {
+  font-size: 1.1em;
+  margin-right: 1px;
+  line-height: 0.9;
+}
+.composite__radicand {
+  border-top: 1.5px solid currentColor;
+  padding: 0 2px;
+  min-width: 0.6em;
+  text-align: center;
+}
+
+/* Absolute value */
+.composite--abs { font-size: 0.85em; }
+.composite__abs-bar {
+  font-weight: 300;
+}
+.composite__abs-inner {
+  padding: 0 2px;
+  min-width: 0.4em;
+}
+
 /* --- Keypad --- */
 
 .keypad {

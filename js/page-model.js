@@ -8,6 +8,17 @@ export const BLOCK = Object.freeze({
   WORKSHEET: 'worksheet'
 });
 
+// Composite cell types — Phase 5. Each composite occupies one logical grid
+// cell but renders with custom internal structure (a fraction stacks num/den,
+// an exponent has a superscript, sqrt draws a radical sign + radicand, etc.).
+// String slots hold the slot's contents; multi-character slots are allowed.
+export const COMPOSITE = Object.freeze({
+  FRACTION: 'fraction',
+  POW: 'pow',
+  SQRT: 'sqrt',
+  ABS: 'abs'
+});
+
 export const DEFAULT_GRID = Object.freeze({ rows: 14, cols: 18 });
 
 let _counter = 0;
@@ -48,9 +59,49 @@ export function getCell(block, row, col) {
 
 export function setCell(block, row, col, value) {
   const key = cellKey(row, col);
-  if (value == null || value.ch === '' || value.ch == null) {
+  if (value == null) {
     delete block.cells[key];
-  } else {
-    block.cells[key] = value;
+    return;
   }
+  // Atom with empty char: clear cell. Composites are kept even when empty
+  // (they're "active" placeholders the cursor lives inside).
+  if (value.ch === '' || (value.ch == null && !value.type)) {
+    delete block.cells[key];
+    return;
+  }
+  block.cells[key] = value;
+}
+
+export function isComposite(cell) {
+  return cell != null && typeof cell.type === 'string';
+}
+
+// Slots in display order (top-to-bottom for vertical, left-to-right for inline).
+export function compositeSlots(cell) {
+  if (!isComposite(cell)) return [];
+  switch (cell.type) {
+    case COMPOSITE.FRACTION: return ['num', 'den'];
+    case COMPOSITE.POW:      return ['base', 'exp'];
+    case COMPOSITE.SQRT:     return ['radicand'];
+    case COMPOSITE.ABS:      return ['inner'];
+    default: return [];
+  }
+}
+
+export function newFractionCell(num = '', den = '') {
+  return { type: COMPOSITE.FRACTION, num, den };
+}
+export function newPowCell(base = '', exp = '') {
+  return { type: COMPOSITE.POW, base, exp };
+}
+export function newSqrtCell(radicand = '') {
+  return { type: COMPOSITE.SQRT, radicand };
+}
+export function newAbsCell(inner = '') {
+  return { type: COMPOSITE.ABS, inner };
+}
+
+export function isCompositeEmpty(cell) {
+  if (!isComposite(cell)) return false;
+  return compositeSlots(cell).every((slot) => !cell[slot]);
 }
