@@ -16,6 +16,7 @@ export const COMPOSITE = Object.freeze({
   FRACTION: 'fraction',
   POW: 'pow',
   SQRT: 'sqrt',
+  NROOT: 'nroot',
   ABS: 'abs'
 });
 
@@ -83,6 +84,10 @@ export function compositeSlots(cell) {
     case COMPOSITE.FRACTION: return ['num', 'den'];
     case COMPOSITE.POW:      return ['base', 'exp'];
     case COMPOSITE.SQRT:     return ['radicand'];
+    // Index slot is entered FIRST so the kid types the n in ⁿ√ before the
+    // radicand — pressing arrow-down (or right-after-typing) moves into the
+    // radicand. See arrowVertical's nroot branch in editor.js.
+    case COMPOSITE.NROOT:    return ['index', 'radicand'];
     case COMPOSITE.ABS:      return ['inner'];
     default: return [];
   }
@@ -96,6 +101,9 @@ export function newPowCell(base = '', exp = '') {
 }
 export function newSqrtCell(radicand = '') {
   return { type: COMPOSITE.SQRT, radicand };
+}
+export function newNRootCell(index = '', radicand = '') {
+  return { type: COMPOSITE.NROOT, index, radicand };
 }
 export function newAbsCell(inner = '') {
   return { type: COMPOSITE.ABS, inner };

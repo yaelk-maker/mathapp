@@ -123,7 +123,7 @@ export function updateCursor(grid, prevCursor, nextCursor, getCellAt) {
 // Render the contents of a single cell DOM node based on the value object.
 function paintCell(cellEl, value, activeSlot) {
   cellEl.innerHTML = '';
-  cellEl.classList.remove('cell--composite', 'cell--fraction', 'cell--pow', 'cell--sqrt', 'cell--abs');
+  cellEl.classList.remove('cell--composite', 'cell--fraction', 'cell--pow', 'cell--sqrt', 'cell--nroot', 'cell--abs');
 
   if (!value) return;
 
@@ -174,6 +174,17 @@ function buildCompositeDOM(cell, activeSlot) {
       sym.textContent = '√';
       const rad = slot('radicand', 'radicand', cell.radicand);
       root.append(sym, rad);
+      break;
+    }
+    case 'nroot': {
+      // ⁿ√x — index sits as a small superscript LEFT of the radical sign,
+      // tucked into the crook of the √. Same one-cell footprint as plain √.
+      const idx = slot('index', 'nroot-index', cell.index, 'sup');
+      const sym = document.createElement('span');
+      sym.className = 'composite__sqrt-sym';
+      sym.textContent = '√';
+      const rad = slot('radicand', 'radicand', cell.radicand);
+      root.append(idx, sym, rad);
       break;
     }
     case 'abs': {

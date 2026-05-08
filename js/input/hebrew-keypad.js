@@ -14,7 +14,7 @@
 // letter — see handleHebrewKey in editor.js). Arrow keys are exposed here
 // so the kid can fix a single Hebrew letter without backspacing through.
 
-import { buildSection } from './keypad.js';
+import { buildSection, makeKey, modeKey } from './keypad.js';
 
 const ROWS = [
   ['ק', 'ר', 'א', 'ט', 'ו', 'ן', 'ם', 'פ'],
@@ -31,31 +31,38 @@ export function renderHebrewKeypad({ onKey }) {
   // per row, so flex matches a physical keyboard better than a grid.
   const lettersBlock = document.createElement('div');
   lettersBlock.className = 'keypad__letters';
-  for (const letters of ROWS) {
+  ROWS.forEach((letters, rowIndex) => {
     const rowEl = document.createElement('div');
     rowEl.className = 'keypad__row';
     for (const ch of letters) {
-      rowEl.appendChild(makeKey(ch, ch, 'letter', onKey));
+      rowEl.appendChild(makeKey({ code: ch, label: ch, kind: 'letter' }, onKey));
+    }
+    // Backspace lives at the right end of the top row (matches the iPadOS
+    // Hebrew keyboard); the dedicated arrow-cluster below has no backspace.
+    if (rowIndex === 0) {
+      rowEl.appendChild(makeKey({
+        code: 'BACKSPACE',
+        label: '⌫',
+        kind: 'edit',
+        title: 'מחק'
+      }, onKey));
     }
     lettersBlock.appendChild(rowEl);
-  }
-  // Bottom action row (LTR): mode-switch, punctuation, space, newline.
+  });
+
+  // Bottom action row (LTR): mode-switch + wide space. Punctuation and
+  // newline keys were dropped — kids type free-text answers as one line.
   const actionRow = document.createElement('div');
-  actionRow.className = 'keypad__row';
-  actionRow.appendChild(makeKey('TOGGLE_KEYPAD', '123', 'mode', onKey));
-  actionRow.appendChild(makeKey('.', '.', 'op', onKey));
-  actionRow.appendChild(makeKey(',', ',', 'op', onKey));
-  actionRow.appendChild(makeKey('?', '?', 'op', onKey));
-  actionRow.appendChild(makeKey('!', '!', 'op', onKey));
-  const space = makeKey('SPACE', 'רווח', 'wide', onKey);
-  space.classList.add('keypad__key--wide');
+  actionRow.className = 'keypad__row keypad__row--bottom';
+  actionRow.appendChild(makeKey(modeKey('מקלדת מתמטית'), onKey));
+  const space = makeKey({ code: 'SPACE', label: 'רווח', kind: 'space' }, onKey);
   actionRow.appendChild(space);
-  actionRow.appendChild(makeKey('NEWLINE', '↵', 'nav', onKey));
   lettersBlock.appendChild(actionRow);
   wrapper.appendChild(lettersBlock);
 
-  // Symmetric arrow cross + backspace, same layout as the math keypad so
-  // the navigation muscle memory carries between modes.
+  // Arrow cluster: ↑ on top row alone (centered), ←↓→ below. Matches the
+  // image in the spec — without backspace, since that moved to the letter
+  // row's right end.
   wrapper.appendChild(
     buildSection(
       {
@@ -67,10 +74,7 @@ export function renderHebrewKeypad({ onKey }) {
           null,
           { code: 'LEFT', label: '←', kind: 'nav' },
           { code: 'DOWN', label: '↓', kind: 'nav' },
-          { code: 'RIGHT', label: '→', kind: 'nav' },
-          null,
-          { code: 'BACKSPACE', label: '⌫', kind: 'edit' },
-          null
+          { code: 'RIGHT', label: '→', kind: 'nav' }
         ]
       },
       onKey
@@ -78,19 +82,4 @@ export function renderHebrewKeypad({ onKey }) {
   );
 
   return wrapper;
-}
-
-function makeKey(code, label, kind, onKey) {
-  const el = document.createElement('button');
-  el.className = `keypad__key ${kind ? `keypad__key--${kind}` : ''}`;
-  el.type = 'button';
-  el.textContent = label;
-  el.dataset.code = code;
-  // mousedown/pointerdown preventDefault so a tap doesn't blur whatever
-  // owns input focus (in our case nothing — we drive the grid directly —
-  // but keep it for safety and to suppress the iOS click delay).
-  el.addEventListener('mousedown', (e) => e.preventDefault());
-  el.addEventListener('pointerdown', (e) => e.preventDefault());
-  el.addEventListener('click', () => onKey(code));
-  return el;
 }

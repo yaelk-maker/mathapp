@@ -588,6 +588,22 @@ h1 {
   text-align: center;
 }
 
+/* Nth-root: small index nestled into the crook of the radical sign,
+   followed by the same √ + over-barred radicand as plain sqrt. */
+.composite--nroot {
+  font-size: 0.7em;
+}
+.composite__nroot-index {
+  font-size: 0.7em;
+  align-self: flex-start;
+  /* Pull the index slightly to the right so it tucks under the √ hook
+     instead of floating off to the left. */
+  margin-right: -0.25em;
+  line-height: 1;
+  min-width: 0.5em;
+  text-align: center;
+}
+
 /* Absolute value */
 .composite--abs { font-size: 0.85em; }
 .composite__abs-bar {
@@ -608,15 +624,20 @@ h1 {
   -webkit-user-select: none;
 }
 
-/* Sectioned keypad: a horizontal row of independent grids. Each section
-   keeps its own column alignment (3x3 digits, 3-wide arrow cross, etc.)
-   without leaking spacing into the others. Sections are vertically centered
-   so the shorter ones (arrows = 3 rows, composites = 2 rows) sit nicely
-   alongside the 4-row digits block instead of stretching to fill. */
-.keypad--sectioned {
+/* Math keypad layout: a top row of grid sections (variables/algebra,
+   digits, vertical operators column, arrows + specials) and a bottom
+   action bar (mode-toggle, wide Space, backspace) that spans the full
+   keypad width. */
+.keypad--math {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.keypad__sections {
   display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
 }
 
@@ -627,9 +648,41 @@ h1 {
      rows a section has. */
   grid-auto-rows: 48px;
   flex: 0 0 auto;
-  align-self: center;
+  align-self: stretch;
 }
-.keypad__section--ops { flex: 1 1 auto; min-width: 0; }
+
+/* Vertical operator column (÷ × − +) — slim and stretches to align with
+   the 4-row digits/vars sections to either side. */
+.keypad__section--ops {
+  flex: 0 0 auto;
+}
+
+/* Variables / algebra section grows to claim leftover horizontal space
+   so the top row hugs the keypad's full width. */
+.keypad__section--vars { flex: 1 1 auto; min-width: 0; }
+.keypad__section--digits { flex: 1 1 auto; min-width: 0; }
+.keypad__section--arrows { flex: 1 1 auto; min-width: 0; }
+
+/* Bottom action bar: mode-toggle on the left, wide Space in the middle,
+   backspace on the right. Same shape on math and Hebrew keypads. */
+.keypad__bottom {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: stretch;
+}
+.keypad__bottom .keypad__key {
+  min-height: 48px;
+  flex: 0 0 auto;
+  /* Mode-toggle and backspace sit at a sensible fixed width so the wide
+     Space key visually dominates the row. */
+  min-width: 80px;
+}
+.keypad__bottom .keypad__key--space {
+  flex: 1 1 auto;
+  font-size: 16px;
+  font-weight: 500;
+}
 
 .keypad__placeholder {
   visibility: hidden;
@@ -661,8 +714,17 @@ h1 {
   align-items: stretch;
 }
 
-.keypad__gap {
-  width: 12px;
+/* Bottom row: mode-toggle (compact) + wide Space. */
+.keypad__row--bottom .keypad__key {
+  min-height: 48px;
+}
+.keypad__row--bottom .keypad__key--space {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+.keypad__row--bottom .keypad__key--mode {
+  flex: 0 0 auto;
+  min-width: 80px;
 }
 
 .keypad__key {
@@ -711,18 +773,53 @@ h1 {
 }
 .keypad__key--edit:active { background: #fbd5d5; }
 
-.keypad__key--wide {
-  flex-grow: 2;
-}
-
 /* Mode-switch key (123 ⇄ אבג) — distinguished so the kid spots it as the
-   keyboard-switch instead of confusing it with a regular character key. */
+   keyboard-switch instead of confusing it with a regular character key.
+   Renders "ABC" stacked over "123" the way the iPadOS system keyboard does
+   so the kid recognises the glyph as a keyboard mode toggle. */
 .keypad__key--mode {
   background: #eef3ff;
   color: var(--accent);
   font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 4px 8px;
 }
 .keypad__key--mode:active { background: #cfdcfb; }
+.keypad__mode-top,
+.keypad__mode-bot {
+  display: block;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+.keypad__mode-top {
+  border-bottom: 1.5px solid currentColor;
+  padding-bottom: 1px;
+  margin-bottom: 2px;
+}
+
+/* Space key — wide, neutral. */
+.keypad__key--space {
+  background: white;
+  color: #555;
+  font-size: 16px;
+}
+
+/* "Var" keys (a, b, x, y) — italic to match math typography. */
+.keypad__key--var {
+  font-style: italic;
+}
+
+/* Composite-creating keys (FRAC, POW, SQRT, SQUARE, NROOT) — stand out
+   from variables/digits so the kid recognises them as structure-builders. */
+.keypad__key--comp {
+  background: #f7faff;
+  color: var(--accent);
+}
+.keypad__key--comp:active { background: #c2d8fb; }
 
 /* --- Work block delete button --- */
 /* Top-right circle (✕) for removing a work area added by mistake. The
