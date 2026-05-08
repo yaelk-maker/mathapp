@@ -14,6 +14,12 @@ import {
   pickJSONFile,
   readJSONFile
 } from './io/export.js';
+import { confirmDialog, promptDialog, toast } from './ui/dialog.js';
+
+// Press-and-hold duration for the destructive notebook delete. Matches the
+// 700ms transition on .notebook-card__delete--arming so the visual fill
+// completes exactly when the action fires.
+const DELETE_LONGPRESS_MS = 700;
 
 const root = document.getElementById('app');
 
@@ -61,8 +67,13 @@ async function renderHome() {
 
   document.getElementById('new-notebook').addEventListener('click', async () => {
     const count = (await listNotebooks()).length;
-    const name = window.prompt('שם המחברת:', `מחברת ${count + 1}`);
-    if (!name || !name.trim()) return;
+    const name = await promptDialog({
+      title: 'מחברת חדשה',
+      body: 'בחרי שם למחברת:',
+      defaultValue: `מחברת ${count + 1}`,
+      confirmLabel: 'יצירה'
+    });
+    if (name == null || !name.trim()) return;
     const nb = await createNotebook(name.trim());
     window.location.hash = `#/notebook/${nb.id}`;
   });
@@ -73,11 +84,16 @@ async function renderHome() {
     try {
       const json = await readJSONFile(file);
       const count = await importNotebooksFromJSON(json);
-      alert(`שוחזרו ${count} מחברות.`);
+      toast(`שוחזרו ${count} מחברות.`);
       await render();
     } catch (err) {
       console.error('Restore failed:', err);
-      alert('שחזור נכשל: ' + (err.message || 'קובץ לא תקין'));
+      await confirmDialog({
+        title: 'שחזור נכשל',
+        body: err.message || 'הקובץ אינו תקין.',
+        confirmLabel: 'אישור',
+        cancelLabel: 'סגירה'
+      });
     }
   });
 
@@ -113,7 +129,8 @@ function renderNotebookList(notebooks, query) {
                   <div class="notebook-card__meta">${formatDate(nb.updatedAt)}</div>
                 </div>
                 <button class="notebook-card__action" data-save="${nb.id}" aria-label="גיבוי" title="גיבוי לדרייב">💾</button>
-                <button class="notebook-card__delete" data-delete="${nb.id}" aria-label="מחק">✕</button>
+                <button class="notebook-card__delete" data-delete="${nb.id}"
+                        aria-label="מחק (לחיצה ארוכה)" title="לחצי וחזיקי כדי למחוק"><span class="longpress-fill"></span>✕</button>
               </div>
             `
               )
@@ -155,23 +172,72 @@ function wireListHandlers(listHost) {
         await shareJSON(data, `mathapp-${safeName}-${stamp}.json`);
       } catch (err) {
         console.error('Single-notebook backup failed:', err);
-        alert('הגיבוי נכשל. נסה שוב.');
+        await confirmDialog({
+          title: 'הגיבוי נכשל',
+          body: 'נסי שוב מאוחר יותר.',
+          confirmLabel: 'אישור',
+          cancelLabel: 'סגירה'
+        });
       }
     });
   }
 
   for (const btn of listHost.querySelectorAll('[data-delete]')) {
-    btn.addEventListener('click', async (event) => {
-      event.stopPropagation();
+    wireDeleteLongPress(btn);
+  }
+}
+
+// Delete is destructive and irrevocable — gate it behind a press-and-hold
+// (DELETE_LONGPRESS_MS) plus a Hebrew confirmation. A short tap shows a
+// helpful toast instead of opening the dialog, so a kid who brushes the
+// button in passing doesn't escalate into a destructive flow.
+function wireDeleteLongPress(btn) {
+  let timer = null;
+  let triggered = false;
+
+  const cancel = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    btn.classList.remove('notebook-card__delete--arming');
+  };
+
+  const begin = (event) => {
+    event.stopPropagation();
+    triggered = false;
+    btn.classList.add('notebook-card__delete--arming');
+    timer = setTimeout(async () => {
+      triggered = true;
+      btn.classList.remove('notebook-card__delete--arming');
       const id = btn.getAttribute('data-delete');
       const nb = await getNotebook(id);
       if (!nb) return;
-      const confirmed = window.confirm(`למחוק את "${nb.name}"? פעולה זו לא ניתנת לביטול.`);
-      if (!confirmed) return;
+      const ok = await confirmDialog({
+        title: 'מחיקת מחברת',
+        body: `למחוק את "${nb.name}"? פעולה זו לא ניתנת לביטול.`,
+        confirmLabel: 'כן, מחקי',
+        cancelLabel: 'ביטול',
+        destructive: true
+      });
+      if (!ok) return;
       await deleteNotebook(id);
       await render();
-    });
-  }
+    }, DELETE_LONGPRESS_MS);
+  };
+
+  btn.addEventListener('pointerdown', begin);
+  btn.addEventListener('pointerup', (event) => {
+    event.stopPropagation();
+    cancel();
+    if (!triggered) {
+      toast('להחזיק כדי למחוק');
+    }
+  });
+  btn.addEventListener('pointerleave', cancel);
+  btn.addEventListener('pointercancel', cancel);
+  // Suppress the synthetic click that would normally bubble to the card.
+  btn.addEventListener('click', (event) => event.stopPropagation());
 }
 
 async function renderEditor(notebookId) {

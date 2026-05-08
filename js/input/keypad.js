@@ -31,9 +31,12 @@ const SECTIONS = [
       { code: '<', label: '<', kind: 'op' },
       { code: '>', label: '>', kind: 'op' },
       { code: 'x', label: 'x', kind: 'var' },
+      { code: '≤', label: '≤', kind: 'op', title: 'קטן או שווה' },
+      { code: '≥', label: '≥', kind: 'op', title: 'גדול או שווה' },
+      { code: 'y', label: 'y', kind: 'var' },
       { code: '(', label: '(', kind: 'op' },
       { code: ')', label: ')', kind: 'op' },
-      { code: 'y', label: 'y', kind: 'var' }
+      { code: 'ABS', label: '|a|', kind: 'comp', title: 'ערך מוחלט' }
     ]
   },
   {
@@ -85,7 +88,11 @@ const SECTIONS = [
       { code: 'UP', label: '↑', kind: 'nav', span: 2 },
       { code: 'LEFT', label: '←', kind: 'nav' },
       { code: 'RIGHT', label: '→', kind: 'nav' },
-      { code: 'DOWN', label: '↓', kind: 'nav', span: 2 }
+      // EXIT: tap to leave the current slot (e.g. fraction numerator). On
+      // a touch-only iPad with no Enter key this is the only way for a kid
+      // to escape a composite without arrow-navigating out.
+      { code: 'EXIT', label: '✓', kind: 'edit', title: 'יציאה (סיום שבר/חזקה)' },
+      { code: 'DOWN', label: '↓', kind: 'nav' }
     ]
   }
 ];
@@ -117,7 +124,8 @@ export function renderKeypad({ onKey }) {
     code: 'BACKSPACE',
     label: '⌫',
     kind: 'edit',
-    title: 'מחק'
+    title: 'מחק (החזקה למחיקה רציפה)',
+    repeat: true
   }, onKey));
   wrapper.appendChild(bottom);
 
@@ -152,6 +160,13 @@ export function buildSection(section, onKey) {
   return el;
 }
 
+// Press-and-hold tuning for `repeat: true` keys (currently just BACKSPACE).
+// REPEAT_DELAY_MS = "feels like a deliberate hold, not an accidental tap";
+// REPEAT_INTERVAL_MS = "fast enough to clear a six-digit cell in <1s but
+// slow enough that the kid can release before deleting too far".
+const REPEAT_DELAY_MS = 380;
+const REPEAT_INTERVAL_MS = 80;
+
 export function makeKey(button, onKey) {
   const el = document.createElement('button');
   el.className = `keypad__key ${button.kind ? `keypad__key--${button.kind}` : ''}`;
@@ -162,7 +177,42 @@ export function makeKey(button, onKey) {
   if (button.title) el.title = button.title;
   if (button.span) el.style.gridColumn = `span ${button.span}`;
   el.addEventListener('mousedown', (e) => e.preventDefault());
-  el.addEventListener('click', () => onKey(button.code));
+
+  if (button.repeat) {
+    // Auto-repeat path: fire once on pointerdown, then start a delayed
+    // interval. Cancel on pointerup/leave/cancel. We suppress the synthesized
+    // click so we don't double-fire after an immediate release.
+    let delayTimer = null;
+    let intervalTimer = null;
+    let suppressClick = false;
+    const stop = () => {
+      if (delayTimer) { clearTimeout(delayTimer); delayTimer = null; }
+      if (intervalTimer) { clearInterval(intervalTimer); intervalTimer = null; }
+    };
+    el.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      suppressClick = true;
+      onKey(button.code);
+      stop();
+      delayTimer = setTimeout(() => {
+        intervalTimer = setInterval(() => onKey(button.code), REPEAT_INTERVAL_MS);
+      }, REPEAT_DELAY_MS);
+    });
+    el.addEventListener('pointerup', stop);
+    el.addEventListener('pointerleave', stop);
+    el.addEventListener('pointercancel', stop);
+    el.addEventListener('click', (event) => {
+      if (suppressClick) {
+        event.preventDefault();
+        event.stopPropagation();
+        suppressClick = false;
+      } else {
+        onKey(button.code);
+      }
+    });
+  } else {
+    el.addEventListener('click', () => onKey(button.code));
+  }
   return el;
 }
 
@@ -188,6 +238,8 @@ export function keyboardEventToCode(event) {
     case '%': return '%';
     case '<': return '<';
     case '>': return '>';
+    case '≤': return '≤';
+    case '≥': return '≥';
     case ' ': return 'SPACE';
     case 'Backspace':
     case 'Delete': return 'BACKSPACE';

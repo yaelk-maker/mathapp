@@ -50,7 +50,8 @@ export function renderHebrewKeypad({ onKey }) {
         code: 'BACKSPACE',
         label: '⌫',
         kind: 'edit',
-        title: 'מחק'
+        title: 'מחק (החזקה למחיקה רציפה)',
+        repeat: true
       }, onKey));
     }
     lettersBlock.appendChild(rowEl);
