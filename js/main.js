@@ -8,7 +8,7 @@ import {
 import { mountEditor } from './editor.js';
 import {
   exportNotebooksToJSON,
-  downloadJSON,
+  shareJSON,
   importNotebooksFromJSON,
   pickJSONFile,
   readJSONFile
@@ -89,7 +89,9 @@ async function renderHome() {
     try {
       const data = await exportNotebooksToJSON();
       const stamp = new Date().toISOString().slice(0, 10);
-      await downloadJSON(data, `mathapp-backup-${stamp}.json`);
+      // Opens the iPadOS share sheet — Files (iCloud), Google Drive app,
+      // Email, AirDrop, etc. Falls back to download on desktop / unsupported.
+      await shareJSON(data, `mathapp-backup-${stamp}.json`);
     } catch (err) {
       console.error('Backup failed:', err);
       alert('הגיבוי נכשל. נסה שוב.');

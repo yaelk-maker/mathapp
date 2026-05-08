@@ -105,3 +105,48 @@ export function isCompositeEmpty(cell) {
   if (!isComposite(cell)) return false;
   return compositeSlots(cell).every((slot) => !cell[slot]);
 }
+
+// How many grid columns a cell occupies. Fractions expand to fit their
+// numerator and denominator; everything else is 1 cell wide.
+export function compositeWidth(cell) {
+  if (!isComposite(cell)) return 1;
+  if (cell.type === COMPOSITE.FRACTION) {
+    const numLen = (cell.num || '').length;
+    const denLen = (cell.den || '').length;
+    return Math.max(numLen, denLen, 1);
+  }
+  return 1;
+}
+
+// Set of "r,c" keys that are occupied by a multi-cell composite anchored at
+// a different cell. Used by the grid renderer to skip the secondary cells.
+export function occupiedCellSet(block) {
+  const occupied = new Set();
+  for (const [key, cell] of Object.entries(block.cells)) {
+    const w = compositeWidth(cell);
+    if (w <= 1) continue;
+    const [r, c] = key.split(',').map(Number);
+    for (let i = 1; i < w; i += 1) {
+      occupied.add(`${r},${c + i}`);
+    }
+  }
+  return occupied;
+}
+
+// If the given (r, c) is occupied by a multi-cell composite anchored elsewhere,
+// returns that anchor's {r, c}. Otherwise returns null (or the cell IS the
+// anchor / empty).
+export function findOccupyingAnchor(block, r, c) {
+  // If there's a direct cell at (r, c) it's its own anchor.
+  if (block.cells[`${r},${c}`]) return null;
+  // Walk back along the row looking for an anchor whose width covers (r, c).
+  // Bound the search at MAX_WIDTH to avoid scanning the entire row.
+  const MAX_WIDTH = 16;
+  for (let cc = c - 1; cc >= Math.max(0, c - MAX_WIDTH); cc -= 1) {
+    const cell = block.cells[`${r},${cc}`];
+    if (!cell) continue;
+    const w = compositeWidth(cell);
+    if (cc + w > c) return { r, c: cc };
+  }
+  return null;
+}

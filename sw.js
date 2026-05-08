@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v9';
+const CACHE = 'mathapp-shell-v12';
 const SHELL = [
   './',
   './index.html',
@@ -15,6 +15,7 @@ const SHELL = [
   './js/input/pencil.js',
   './js/io/import.js',
   './js/io/export.js',
+  './js/io/cropper.js',
   './vendor/idb.js',
   './icons/icon-180.png',
   './icons/icon-192.png',

@@ -328,6 +328,31 @@ h1 {
   gap: 16px;
 }
 
+/* --- Split view: worksheet next to work block (worksheet on the right
+   in the RTL flow direction; work block on the left). Best on landscape
+   iPad; usable but cramped on portrait. --- */
+.editor--split #page {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+}
+.editor--split #page > .worksheet,
+.editor--split #page > .workblock {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 50%;
+}
+.editor--split #page > .workblock {
+  /* If the natural grid is wider than the column, allow horizontal scroll
+     within the workblock instead of overflowing the page. */
+  overflow-x: auto;
+}
+.editor--split .worksheet__image {
+  max-width: 100%;
+  height: auto;
+}
+
 /* --- Worksheet block --- */
 /* CRITICAL: this block has NO grid background. The grid is only inside
    WorkBlocks. That separation is the architectural fix vs. ModMath. */
@@ -442,28 +467,37 @@ h1 {
   font-size: 1em;
 }
 
-/* Fractions: numerator stacked over denominator with a horizontal bar */
+/* Fractions: numerator stacked over denominator with a horizontal bar.
+   The cell's grid-column-span gives the bar length; digits stay readable. */
 .composite--fraction {
   flex-direction: column;
-  font-size: 0.55em;
+  font-size: 0.6em;
 }
-.composite--tight { font-size: 0.45em; }
-.composite--very-tight { font-size: 0.36em; }
 .composite__num,
 .composite__den {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 1em;
-  padding: 0 0.1em;
+  padding: 0 0.15em;
   white-space: nowrap;
+  letter-spacing: 0.3em;
 }
 .composite__bar {
   display: block;
-  width: 80%;
+  /* Pad in slightly from cell edges so the bar doesn't kiss neighbors. */
+  width: calc(100% - 4px);
   height: 1.5px;
   background: currentColor;
-  margin: 1px 0;
+  margin: 2px auto;
+}
+
+/* For wide (multi-column) fractions, digits should sit naturally with
+   light tracking so they read as a number (1 2 → "12"), not as columns. */
+.cell--span .composite__num,
+.cell--span .composite__den {
+  letter-spacing: 0.45em;
+  padding: 0 0.2em;
 }
 
 /* Slot highlight when cursor is inside */
@@ -581,6 +615,92 @@ h1 {
 .keypad__key--wide {
   flex-grow: 2;
 }
+
+/* --- Image cropper overlay (Phase: bug-fixes) --- */
+
+.crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 20, 0.92);
+  display: flex;
+  flex-direction: column;
+  color: white;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.crop-overlay__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.4);
+}
+.crop-overlay__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+.crop-overlay__bar--bottom { gap: 12px; flex-wrap: wrap; }
+
+.crop-overlay__stage {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+}
+
+.crop-overlay__imgwrap {
+  position: absolute;
+  /* Sized in JS to match the displayed image */
+}
+
+.crop-overlay__img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.crop-rect {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  border: 2px solid white;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  cursor: move;
+  touch-action: none;
+}
+
+.crop-handle {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  background: white;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  touch-action: none;
+}
+.crop-handle[data-handle="nw"] { left: -20px; top: -20px; cursor: nwse-resize; }
+.crop-handle[data-handle="ne"] { right: -20px; top: -20px; cursor: nesw-resize; }
+.crop-handle[data-handle="sw"] { left: -20px; bottom: -20px; cursor: nesw-resize; }
+.crop-handle[data-handle="se"] { right: -20px; bottom: -20px; cursor: nwse-resize; }
+
+/* Buttons inside the cropper override the dark theme */
+.crop-overlay .btn {
+  background: var(--accent);
+  color: white;
+}
+.crop-overlay .btn--ghost {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.crop-overlay .btn--ghost:active { background: rgba(255, 255, 255, 0.2); }
 
 /* iPadOS PWA standalone polish */
 @media (display-mode: standalone) {

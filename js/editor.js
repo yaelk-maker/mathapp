@@ -23,6 +23,8 @@ import {
   isComposite,
   compositeSlots,
   isCompositeEmpty,
+  compositeWidth,
+  findOccupyingAnchor,
   newFractionCell,
   newPowCell,
   newSqrtCell
@@ -109,6 +111,7 @@ export async function mountEditor(root, notebookId) {
       <div class="editor__actions">
         <button class="btn btn--ghost" id="upload-photo">📷 צלם דף</button>
         <button class="btn btn--ghost" id="upload-library">🖼️ בחר תמונה</button>
+        <button class="btn btn--ghost" id="toggle-split">🔀 פיצול</button>
         <button class="btn btn--ghost" id="print-page">🖨️ הדפסה</button>
         <span class="editor__sep"></span>
         <button class="btn btn--ghost" id="toggle-pen">✏️ ציור</button>
@@ -160,6 +163,23 @@ export async function mountEditor(root, notebookId) {
   document.getElementById('upload-library').addEventListener('click', () =>
     addWorksheet({ capture: false })
   );
+
+  // Split-view toggle: in split mode the worksheet sits next to the work
+  // block (instead of above). Persisted in localStorage so the preference
+  // sticks across sessions.
+  const editorEl = root.querySelector('.editor--full');
+  const splitToggleBtn = document.getElementById('toggle-split');
+  let splitMode = localStorage.getItem('mathapp.splitMode') === '1';
+  editorEl.classList.toggle('editor--split', splitMode);
+  splitToggleBtn.classList.toggle('btn--active', splitMode);
+  splitToggleBtn.addEventListener('click', () => {
+    splitMode = !splitMode;
+    localStorage.setItem('mathapp.splitMode', splitMode ? '1' : '0');
+    editorEl.classList.toggle('editor--split', splitMode);
+    splitToggleBtn.classList.toggle('btn--active', splitMode);
+    // Layout changed — re-measure the canvas so strokes still render.
+    requestAnimationFrame(() => resizeAndReplay());
+  });
 
   // Print: snapshot the canvas as an <img> in place so drawings make it
   // into the PDF (browsers don't reliably print absolute-positioned canvas).
@@ -310,6 +330,36 @@ export async function mountEditor(root, notebookId) {
     const block = page.blocks.find((b) => b.id === blockId);
     if (!block) return;
     if (!window.confirm('להסיר את הדף הזה? המשבצות שלמטה יישמרו.')) return;
+
+    // For worksheet blocks: also delete any pen strokes that were drawn on
+    // top of it. Without this, the strokes would float in empty space after
+    // the image is gone. Strokes are page-scoped; we identify the ones to
+    // delete by which fall within the worksheet's vertical extent on the
+    // canvas (canvas coords = pageContent-relative pixels, same coord
+    // system stroke points are stored in).
+    if (block.type === BLOCK.WORKSHEET) {
+      const figure = pageHost.querySelector(`[data-block-id="${blockId}"]`);
+      if (figure && pageContent) {
+        const figRect = figure.getBoundingClientRect();
+        const contentRect = pageContent.getBoundingClientRect();
+        const yTop = figRect.top - contentRect.top;
+        const yBottom = figRect.bottom - contentRect.top;
+        // Wait for any in-flight saves so we don't race with stroke writes.
+        await Promise.allSettled([...pendingStrokeSaves]);
+        const toDelete = strokes.filter((s) =>
+          (s.points || []).some((p) => p.y >= yTop && p.y <= yBottom)
+        );
+        for (const stroke of toDelete) {
+          try { await deleteStrokeById(stroke.id); } catch (_) {}
+        }
+        // Drop deleted strokes from in-memory array.
+        const deletedIds = new Set(toDelete.map((s) => s.id));
+        for (let i = strokes.length - 1; i >= 0; i -= 1) {
+          if (deletedIds.has(strokes[i].id)) strokes.splice(i, 1);
+        }
+      }
+    }
+
     page.blocks = page.blocks.filter((b) => b.id !== blockId);
     if (block.type === BLOCK.WORKSHEET && block.blobId) {
       revokeBlobUrl(block.blobId);
@@ -483,13 +533,9 @@ export async function mountEditor(root, notebookId) {
 
     if (cursor.slot) {
       if (!isComposite(cell)) {
-        // Stray slot state — clear and fall through.
         cursor.slot = null;
       } else {
-        cell[cursor.slot] = (cell[cursor.slot] || '') + ch;
-        repaintCell(r, c);
-        queueSave();
-        return;
+        return appendToSlot(cell, r, c, cursor.slot, ch);
       }
     }
 
@@ -499,16 +545,39 @@ export async function mountEditor(root, notebookId) {
       const firstSlot = compositeSlots(cell)[0];
       if (firstSlot) {
         cursor.slot = firstSlot;
-        cell[firstSlot] = (cell[firstSlot] || '') + ch;
-        repaintCell(r, c);
-        queueSave();
-        return;
+        return appendToSlot(cell, r, c, firstSlot, ch);
       }
     }
 
     activeWorkBlock.cells[`${r},${c}`] = { ch };
     updateCell(activeGrid, activeWorkBlock, r, c);
     if (c + 1 < activeWorkBlock.cols) moveCursor(r, c + 1);
+    queueSave();
+  }
+
+  // Append a char into a composite slot, expanding the cell's width if the
+  // slot grows. Refuses to expand when the next column is taken or beyond
+  // the grid edge.
+  function appendToSlot(cell, r, c, slot, ch) {
+    const oldWidth = compositeWidth(cell);
+    const tentativeValue = (cell[slot] || '') + ch;
+    const hypothetical = { ...cell, [slot]: tentativeValue };
+    const newWidth = compositeWidth(hypothetical);
+
+    if (newWidth > oldWidth) {
+      // Check each new column we'd consume is in-bounds and unoccupied.
+      for (let i = oldWidth; i < newWidth; i += 1) {
+        if (c + i >= activeWorkBlock.cols) return; // hit right edge
+        if (activeWorkBlock.cells[`${r},${c + i}`]) return; // collision
+      }
+    }
+
+    cell[slot] = tentativeValue;
+    if (newWidth !== oldWidth) {
+      rerenderActiveGrid();
+    } else {
+      repaintCell(r, c);
+    }
     queueSave();
   }
 
@@ -579,18 +648,22 @@ export async function mountEditor(root, notebookId) {
       } else {
         const current = here[cursor.slot] || '';
         if (current.length > 0) {
+          const oldWidth = compositeWidth(here);
           here[cursor.slot] = current.slice(0, -1);
-          repaintCell(r, c);
+          const newWidth = compositeWidth(here);
+          if (newWidth !== oldWidth) rerenderActiveGrid();
+          else repaintCell(r, c);
           queueSave();
           return;
         }
         // Slot is empty.
         if (isCompositeEmpty(here)) {
-          // Collapse and remove the empty composite — return cursor to its
-          // grid position with no slot.
+          // Collapse the empty composite. Re-render in case it was wide.
+          const wasWide = compositeWidth(here) > 1;
           delete activeWorkBlock.cells[`${r},${c}`];
           cursor.slot = null;
-          repaintCell(r, c);
+          if (wasWide) rerenderActiveGrid();
+          else repaintCell(r, c);
           queueSave();
           return;
         }
@@ -629,7 +702,18 @@ export async function mountEditor(root, notebookId) {
       exitComposite(dir);
       return;
     }
-    moveCursor(cursor.r, cursor.c + dir);
+    if (dir > 0) {
+      // Skip past the full width of the current cell (wide fractions).
+      const here = getCellAt(cursor.r, cursor.c);
+      const advance = here ? compositeWidth(here) : 1;
+      moveCursor(cursor.r, cursor.c + advance);
+    } else {
+      // Going left: if (c - 1) is occupied by a wider anchor, jump to the
+      // anchor's column rather than land on a phantom cell.
+      const targetC = cursor.c - 1;
+      const occupyingAnchor = findOccupyingAnchor(activeWorkBlock, cursor.r, targetC);
+      moveCursor(cursor.r, occupyingAnchor ? occupyingAnchor.c : targetC);
+    }
   }
 
   function arrowVertical(dir) {
@@ -674,9 +758,12 @@ export async function mountEditor(root, notebookId) {
       repaintCell(cursor.r, cursor.c);
       return;
     }
-    const targetC = cursor.c + (dir > 0 ? 1 : -1);
+    // Skip past the FULL width of the composite — wide fractions occupy
+    // multiple columns, and the cursor must land outside their span.
+    const here = getCellAt(cursor.r, cursor.c);
+    const w = here ? compositeWidth(here) : 1;
+    const targetC = dir > 0 ? cursor.c + w : cursor.c - 1;
     if (targetC < 0 || targetC >= activeWorkBlock.cols) {
-      // No room to move — at least clear the slot highlight in place.
       repaintCell(cursor.r, cursor.c);
       return;
     }
@@ -698,13 +785,22 @@ export async function mountEditor(root, notebookId) {
   function moveCursorTo(r, c, slot, options = {}) {
     if (!activeWorkBlock) return;
     const { autoEnterSlot = true } = options;
-    const nr = clamp(r, 0, activeWorkBlock.rows - 1);
-    const nc = clamp(c, 0, activeWorkBlock.cols - 1);
+    let nr = clamp(r, 0, activeWorkBlock.rows - 1);
+    let nc = clamp(c, 0, activeWorkBlock.cols - 1);
+
+    // If the target cell is occupied by a multi-cell composite anchored
+    // elsewhere, redirect to the anchor — there's no rendered cell at the
+    // requested position.
+    const occupyingAnchor = findOccupyingAnchor(activeWorkBlock, nr, nc);
+    if (occupyingAnchor) {
+      nr = occupyingAnchor.r;
+      nc = occupyingAnchor.c;
+    }
+
     const target = getCellAt(nr, nc);
 
     let effectiveSlot = slot || null;
     if (effectiveSlot != null && !isComposite(target)) {
-      // Asked for a slot but the cell isn't composite — discard.
       effectiveSlot = null;
     } else if (effectiveSlot == null && autoEnterSlot && isComposite(target)) {
       effectiveSlot = compositeSlots(target)[0] || null;
@@ -717,6 +813,21 @@ export async function mountEditor(root, notebookId) {
     cursor.c = nc;
     cursor.slot = effectiveSlot;
     updateCursor(activeGrid, prev, cursor, getCellAt);
+  }
+
+  // Re-render just the active work block in place. Used when a fraction's
+  // width changes (cells need to be added/removed to match the new span).
+  function rerenderActiveGrid() {
+    if (!activeGrid || !activeWorkBlock) return;
+    const wrapper = activeGrid.parentElement; // .workblock
+    if (!wrapper || !wrapper.parentElement) return;
+    const parent = wrapper.parentElement;
+    const { wrapper: newWrapper, grid: newGrid } = renderWorkBlock(activeWorkBlock, {
+      cursor,
+      onCellTap: (r, c) => moveCursor(r, c)
+    });
+    parent.replaceChild(newWrapper, wrapper);
+    activeGrid = newGrid;
   }
 
   function repaintCell(r, c) {

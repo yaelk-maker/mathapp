@@ -3,7 +3,14 @@
 // render with custom inner DOM but still occupy exactly one grid position.
 // Math is LTR even when the page UI is RTL.
 
-import { getCell, cellKey, isComposite, compositeSlots } from '../page-model.js';
+import {
+  getCell,
+  cellKey,
+  isComposite,
+  compositeSlots,
+  compositeWidth,
+  occupiedCellSet
+} from '../page-model.js';
 
 export function renderWorkBlock(block, options = {}) {
   const { onCellTap, cursor } = options;
@@ -18,17 +25,32 @@ export function renderWorkBlock(block, options = {}) {
   grid.style.setProperty('--rows', block.rows);
   grid.style.setProperty('--cols', block.cols);
 
+  // Cells covered by a multi-cell composite anchored elsewhere — skip them
+  // so the anchor's `grid-column: span N` actually has the columns to occupy.
+  const occupied = occupiedCellSet(block);
+
   for (let r = 0; r < block.rows; r += 1) {
     for (let c = 0; c < block.cols; c += 1) {
+      if (occupied.has(`${r},${c}`)) continue;
+
       const cell = document.createElement('div');
       cell.className = 'cell';
       cell.dataset.r = r;
       cell.dataset.c = c;
 
       const value = getCell(block, r, c);
+      const width = compositeWidth(value);
+
+      // Explicit grid placement so skipping cells doesn't shift the row.
+      cell.style.gridRowStart = r + 1;
+      cell.style.gridColumnStart = c + 1;
+      if (width > 1) {
+        cell.style.gridColumnEnd = `span ${width}`;
+        cell.classList.add('cell--span');
+      }
+
       const isCursor = cursor && cursor.r === r && cursor.c === c;
       paintCell(cell, value, isCursor ? cursor.slot : null);
-
       if (isCursor) cell.classList.add('cell--cursor');
 
       grid.appendChild(cell);
@@ -116,10 +138,8 @@ function buildCompositeDOM(cell, activeSlot) {
       const bar = document.createElement('span');
       bar.className = 'composite__bar';
       const den = slot('den', 'den', cell.den);
-      // Tighten font when slot strings get long.
-      const longest = Math.max((cell.num || '').length, (cell.den || '').length);
-      if (longest >= 2) root.classList.add('composite--tight');
-      if (longest >= 3) root.classList.add('composite--very-tight');
+      // Width is handled by the surrounding cell's grid-column span — the
+      // digits stay full-size and the bar simply gets wider.
       root.append(num, bar, den);
       break;
     }

@@ -84,6 +84,32 @@ export function triggerDownload(blob, filename) {
   }, 200);
 }
 
+// Open the native iPadOS share sheet so the user can save the backup to
+// Files (iCloud Drive), the Google Drive app, Email, AirDrop, etc.
+// Falls back to plain download on browsers without Web Share API support.
+export async function shareJSON(data, filename = 'mathapp-backup.json') {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const file = new File([blob], filename, { type: 'application/json' });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: 'גיבוי MathApp',
+        text: 'גיבוי המחברות'
+      });
+      return 'shared';
+    } catch (err) {
+      // User cancelled, or share failed — fall back to download.
+      if (err && err.name === 'AbortError') return 'cancelled';
+      console.warn('Share failed, falling back to download:', err);
+    }
+  }
+  triggerDownload(blob, filename);
+  return 'downloaded';
+}
+
 export async function importNotebooksFromJSON(json) {
   if (!json || json.app !== FORMAT.app || !Array.isArray(json.notebooks)) {
     throw new Error('פורמט קובץ לא תקין');
