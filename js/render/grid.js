@@ -30,6 +30,12 @@ export function renderWorkBlock(block, options = {}) {
   // so the anchor's `grid-column: span N` actually has the columns to occupy.
   const occupied = occupiedCellSet(block);
 
+  // Columns containing a comparison/equality symbol — used to draw faint
+  // vertical alignment guides so the kid can stack `>`/`<`/`=` across solving
+  // steps without manually counting cells.
+  const ALIGN_CHARS = new Set(['=', '>', '<', '≤', '≥', '≠']);
+  const alignCols = new Set();
+
   for (let r = 0; r < block.rows; r += 1) {
     for (let c = 0; c < block.cols; c += 1) {
       if (occupied.has(`${r},${c}`)) continue;
@@ -54,8 +60,25 @@ export function renderWorkBlock(block, options = {}) {
       paintCell(cell, value, isCursor ? cursor.slot : null);
       if (isCursor) cell.classList.add('cell--cursor');
 
+      if (value && !isComposite(value) && ALIGN_CHARS.has(value.ch)) {
+        alignCols.add(c);
+      }
+
       grid.appendChild(cell);
     }
+  }
+
+  // Render a faint vertical guide spanning all rows for each column where a
+  // comparison symbol lives. Visual-only; click events fall through to the
+  // cells beneath via pointer-events: none.
+  for (const col of alignCols) {
+    const guide = document.createElement('div');
+    guide.className = 'grid__align-guide';
+    guide.style.gridRowStart = 1;
+    guide.style.gridRowEnd = `span ${block.rows}`;
+    guide.style.gridColumnStart = col + 1;
+    guide.style.gridColumnEnd = 'span 1';
+    grid.appendChild(guide);
   }
 
   // Long-press on a non-empty cell starts a "move part" drag — the kid
