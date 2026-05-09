@@ -264,13 +264,6 @@ export function pickJSONFile() {
       finish(input.files && input.files[0] ? input.files[0] : null)
     );
     input.addEventListener('cancel', () => finish(null));
-    const onFocus = () => {
-      setTimeout(() => {
-        if (!resolved) finish(null);
-        window.removeEventListener('focus', onFocus);
-      }, 300);
-    };
-    window.addEventListener('focus', onFocus);
     input.click();
   });
 }
