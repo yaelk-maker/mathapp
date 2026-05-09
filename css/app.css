@@ -866,46 +866,32 @@ h1 {
 .keypad {
   background: #f0f0f0;
   border-radius: 12px;
-  padding: 8px;
+  /* Tight padding so the math grid stretches to the screen edges — every
+     extra pixel of horizontal padding here is a pixel the digit keys lose
+     in split view. */
+  padding: 6px;
   user-select: none;
   -webkit-user-select: none;
+  box-sizing: border-box;
 }
 
-/* Math keypad layout: a single flex row of 4 sections (vars, digits, ops,
-   arrows). Each section is its own 5-row grid; the 5th row across all
-   sections forms a continuous action band (mode-toggle, Space pieces,
-   backspace) that aligns column-by-column with the keys above. There is
-   no longer a separate bottom action bar. */
+/* Math keypad — a single 9-column × 5-row CSS grid that spans the full
+   editor width. Wide keys (Space span 4, ⌫/↑/↓/ABC span 2) sit cleanly
+   across what used to be section boundaries, and at any viewport width
+   each column has the same width so digits, ops and arrows always line
+   up vertically. */
 .keypad--math {
-  display: flex;
-  flex-direction: column;
+  display: block;
+  width: 100%;
 }
 
-.keypad__sections {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  gap: 6px;
-}
-
-.keypad__section {
+.keypad__grid {
   display: grid;
-  gap: 6px;
-  /* Fixed-height rows so keys stay button-sized regardless of how many
-     rows a section has. */
-  grid-auto-rows: 48px;
-  flex: 0 0 auto;
-  align-self: stretch;
+  grid-template-columns: repeat(9, 1fr);
+  grid-auto-rows: minmax(46px, 1fr);
+  gap: 5px;
+  width: 100%;
 }
-
-/* Each section uses flex weights proportional to its column count so a
-   key in the digits section is the same width as a key in vars, ops or
-   arrows. Vars/digits = 3 cols, arrows = 2 cols, ops = 1 col → totals 9
-   weighted units across the row. */
-.keypad__section--vars { flex: 3 1 0; min-width: 0; }
-.keypad__section--digits { flex: 3 1 0; min-width: 0; }
-.keypad__section--ops { flex: 1 1 0; min-width: 0; }
-.keypad__section--arrows { flex: 2 1 0; min-width: 0; }
 
 .keypad__placeholder {
   visibility: hidden;
@@ -978,10 +964,14 @@ h1 {
   transition: background 0.05s ease, transform 0.05s ease;
 }
 
-/* Inside a CSS-grid section, keys don't need a flex basis. */
-.keypad__section .keypad__key {
+/* Inside the math keypad's 9-col grid, keys are sized by the grid track,
+   so they don't need a flex basis or a min-width. min-width: 0 lets a
+   single-column key (e.g. < or x) shrink with the viewport instead of
+   forcing horizontal overflow on narrow split-view widths. */
+.keypad__grid .keypad__key {
   flex: initial;
   width: 100%;
+  min-width: 0;
 }
 
 .keypad__key:active {
