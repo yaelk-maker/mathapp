@@ -472,7 +472,12 @@ h1 {
 }
 
 .grid {
-  --cell-size: 38px;
+  /* Default 38px cell, but shrink to fit when the grid would otherwise
+     exceed the viewport width. Without the cap, a 24-col grid (912px) on
+     iPad portrait (~810px) overflows the screen, dragging the worksheet
+     image and keypad off the left edge in RTL flow. The 24px subtracted
+     covers .editor--full's 8px padding on each side plus a safety margin. */
+  --cell-size: min(38px, calc((100vw - 24px) / var(--cols)));
   display: grid;
   grid-template-columns: repeat(var(--cols), var(--cell-size));
   grid-template-rows: repeat(var(--rows), var(--cell-size));
