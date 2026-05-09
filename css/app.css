@@ -264,11 +264,73 @@ h1 {
      the editor to its parent (#app = viewport width). */
   width: 100%;
   margin: 0;
+  position: relative;
 }
 
 .editor--full .editor__topbar {
   margin-bottom: 8px;
+  align-items: center;
 }
+
+/* --- Collapsible chrome (topbar + actions) ---
+   The chrome eats two rows in split view. Hide it by default behind the ≡
+   floating button; the kid taps to reveal, and it auto-hides 4s after the
+   last interaction. On a kid's iPad this is the single biggest win for
+   workspace size. */
+.editor__chrome {
+  display: contents;
+}
+.editor--chrome-collapsed .editor__chrome {
+  display: none;
+}
+.editor__chrome-toggle {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 6px);
+  inset-inline-start: 8px;
+  z-index: 8;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--accent);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.editor__chrome-toggle:active {
+  background: rgba(11, 108, 242, 0.1);
+}
+/* Hide the floating ≡ when the chrome is open — the close × inside the
+   chrome takes over. */
+.editor--full:not(.editor--chrome-collapsed) .editor__chrome-toggle {
+  display: none;
+}
+.editor__chrome-close {
+  margin-inline-start: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.editor__chrome-close:active { background: rgba(0, 0, 0, 0.06); }
 
 .editor__actions {
   display: flex;
@@ -423,6 +485,51 @@ h1 {
   height: auto;
 }
 
+/* In split view the work area is the bottleneck — shrink each grid cell
+   ~20% so two more equation lines fit before the kid has to scroll. The
+   font size is bound to --cell-size so the digits scale with the cell. */
+.editor--split .grid {
+  --cell-size: min(30px, calc((100vw - 104px) / var(--cols) / 2));
+}
+
+/* --- Worksheet thumbnail-peek (split view) ---
+   When the kid has the equations memorised the photo is just real estate.
+   Tap the worksheet to collapse it to a thin thumbnail at the start of
+   the row; tap again to expand back to half-width. */
+.editor--split .worksheet {
+  cursor: pointer;
+  transition: max-width 0.18s ease, flex-grow 0.18s ease;
+}
+.editor--split .worksheet--collapsed {
+  flex: 0 0 auto;
+  max-width: 96px;
+}
+.editor--split .worksheet--collapsed .worksheet__image {
+  max-height: 96px;
+  object-fit: cover;
+  opacity: 0.85;
+}
+.editor--split .worksheet--collapsed::after {
+  content: '⤢';
+  position: absolute;
+  bottom: 4px;
+  inset-inline-end: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  color: white;
+  font-size: 14px;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+/* When the worksheet is collapsed, let the workblock claim the freed space. */
+.editor--split #page > .workblock.workblock--peek-expanded {
+  max-width: calc(100% - 110px);
+}
+
 /* --- Worksheet block --- */
 /* CRITICAL: this block has NO grid background. The grid is only inside
    WorkBlocks. That separation is the architectural fix vs. ModMath. */
@@ -468,7 +575,65 @@ h1 {
 
 .editor__keypad-host {
   flex: 0 0 auto;
-  margin-top: 8px;
+  margin-top: 4px;
+  position: relative;
+}
+
+/* Drag handle at the top of the keypad — tap or drag down to dismiss. The
+   kid then sees a small ⌨ pill that brings the keypad back. */
+.editor__keypad-handle {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  width: 56px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.editor__keypad-handle:active { background: rgba(0, 0, 0, 0.04); }
+
+.editor__keypad-show {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom) + 8px);
+  inset-inline-end: 12px;
+  z-index: 8;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--accent);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+.editor__keypad-show[hidden] { display: none; }
+.editor__keypad-show:active { background: rgba(11, 108, 242, 0.1); }
+
+/* Collapsed state — hide the keypad host so the worksheet/work block reflows
+   to fill the freed vertical space. */
+.editor--keypad-collapsed .editor__keypad-host {
+  display: none;
 }
 
 /* --- Work block grid --- */
@@ -706,21 +871,21 @@ h1 {
   -webkit-user-select: none;
 }
 
-/* Math keypad layout: a top row of grid sections (variables/algebra,
-   digits, vertical operators column, arrows + specials) and a bottom
-   action bar (mode-toggle, wide Space, backspace) that spans the full
-   keypad width. */
+/* Math keypad layout: a single flex row of 4 sections (vars, digits, ops,
+   arrows). Each section is its own 5-row grid; the 5th row across all
+   sections forms a continuous action band (mode-toggle, Space pieces,
+   backspace) that aligns column-by-column with the keys above. There is
+   no longer a separate bottom action bar. */
 .keypad--math {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
 .keypad__sections {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: 10px;
+  gap: 6px;
 }
 
 .keypad__section {
@@ -741,25 +906,6 @@ h1 {
 .keypad__section--digits { flex: 3 1 0; min-width: 0; }
 .keypad__section--ops { flex: 1 1 0; min-width: 0; }
 .keypad__section--arrows { flex: 2 1 0; min-width: 0; }
-
-/* Bottom action bar: mode-toggle on the left, Space in the middle,
-   backspace on the right. Weighted 1:2:1 so Space stays clearly the
-   widest key while ABC/123 and ⌫ are large enough to tap easily. */
-.keypad__bottom {
-  display: flex;
-  flex-direction: row;
-  gap: 6px;
-  align-items: stretch;
-}
-.keypad__bottom .keypad__key { min-height: 48px; }
-.keypad__bottom .keypad__key--mode { flex: 1 1 0; min-width: 0; }
-.keypad__bottom .keypad__key--space {
-  flex: 2 1 0;
-  min-width: 0;
-  font-size: 16px;
-  font-weight: 500;
-}
-.keypad__bottom .keypad__key--edit { flex: 1 1 0; min-width: 0; }
 
 .keypad__placeholder {
   visibility: hidden;
@@ -894,11 +1040,40 @@ h1 {
   background: white;
   color: #555;
   font-size: 16px;
+  font-weight: 500;
 }
 
-/* "Var" keys (a, b, x, y) — italic to match math typography. */
+/* "Var" keys (a, b, x, y) — italic to match math typography, blue accent
+   to match the other non-digit keys (operators, composites, mode toggle). */
 .keypad__key--var {
   font-style: italic;
+  color: var(--accent);
+  background: #f7faff;
+}
+.keypad__key--var:active { background: #c2d8fb; }
+
+/* Long-press alternate-key hint (≤ on <, ≥ on >). The main glyph is
+   centered; the alt sits as a tiny superscript in the corner. */
+.keypad__key .keypad__longpress {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 4px;
+  font-size: 10px;
+  opacity: 0.55;
+  font-weight: 600;
+  pointer-events: none;
+  line-height: 1;
+}
+.keypad__key .keypad__main {
+  display: inline-block;
+}
+/* Anchor the longpress badge against the key. */
+.keypad__key {
+  position: relative;
+}
+/* Brief flash when a long-press fires so the kid knows the alt code went. */
+.keypad__key--longpress-fired {
+  background: #c2d8fb !important;
 }
 
 /* a/b fraction key glyph — stacked numerator/bar/denominator that matches
@@ -1004,10 +1179,10 @@ h1 {
   100% { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
 }
 
-/* Column-counter chip on the workblock — shows current/max columns at a glance,
-   and turns amber when the row is full so the kid knows space is tight before
-   the first edge refusal. Sits on the top-end of the workblock, opposite the
-   drag handle, so it doesn't compete with the resize ⤡ in the bottom corner. */
+/* Column-counter chip on the workblock — shows current/max columns at a glance.
+   Hidden by default to keep the work area uncluttered; only appears when the
+   row gets close to full (--full state) so the kid sees space pressure right
+   before the first edge refusal. */
 .workblock__cols {
   position: absolute;
   top: -10px;
@@ -1023,8 +1198,10 @@ h1 {
   pointer-events: none;
   z-index: 4;
   font-variant-numeric: tabular-nums;
+  display: none;
 }
 .workblock__cols--full {
+  display: block;
   background: #fff3cd;
   color: #6b4d00;
   border-color: #f0c36d;
@@ -1404,23 +1581,11 @@ body.system-kbd-up .editor__keypad-host {
 .dialog__btn--danger:active { background: #962a1f; }
 .dialog__btn:active { background: rgba(11, 108, 242, 0.06); }
 
-/* --- Keypad-mode indicator: small persistent chip above the keypad host
-   so the kid always knows whether keys insert digits or Hebrew letters. --- */
-.keypad-mode-badge {
-  display: inline-block;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
-  background: #eaf1ff;
-  border: 1px solid rgba(11, 108, 242, 0.25);
-  border-radius: 999px;
-  padding: 3px 10px;
-  margin: 0 4px 6px;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.keypad-mode-badge--hebrew {
-  color: #5a3ea6;
+/* --- Hebrew-mode tint on the math/Hebrew toggle key.
+   The mode badge is gone; the toggle key itself shifts hue when the
+   Hebrew keypad is up so the kid still has a visual cue of which
+   keypad she's on. --- */
+.editor--hebrew-mode .keypad__key--mode {
   background: #f0eaff;
-  border-color: rgba(90, 62, 166, 0.25);
+  color: #5a3ea6;
 }
