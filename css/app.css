@@ -257,6 +257,13 @@ h1 {
   padding-top: calc(8px + env(safe-area-inset-top));
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
   max-width: none;
+  /* Override .editor's `margin: 0 auto`. In a flex column, auto cross-axis
+     margins disable `align-items: stretch` and let the editor size by
+     content (max-content), which on iPad portrait grows past the viewport
+     and drags the keypad off the left edge in RTL flow. width: 100% pins
+     the editor to its parent (#app = viewport width). */
+  width: 100%;
+  margin: 0;
 }
 
 .editor--full .editor__topbar {
@@ -478,13 +485,12 @@ h1 {
 
 .grid {
   /* Default 38px cell, but shrink to fit when the grid would otherwise
-     exceed the viewport width. The 56px subtracted accounts for the full
-     padding chain around the grid: editor--full padding (8px each side =
-     16px), editor__page-content padding (16px each side = 32px), plus
-     8px breathing room for the resize handle which extends 18px past the
-     workblock's right edge. Without the cap, a 24-col grid (912px) on
-     iPad 9.7" portrait (768px viewport) overflows the screen. */
-  --cell-size: min(38px, calc((100vw - 56px) / var(--cols)));
+     exceed the viewport width. The 104px subtracted accounts for the full
+     padding chain around the grid: editor--full padding (8 each side = 16),
+     editor__page padding+border (24+1 each side = 50), editor__page-content
+     padding (16 each side = 32), plus ~6px breathing room. Without this,
+     a 24-col grid (912px at 38px cells) overflows iPad 9.7" portrait. */
+  --cell-size: min(38px, calc((100vw - 104px) / var(--cols)));
   display: grid;
   grid-template-columns: repeat(var(--cols), var(--cell-size));
   grid-template-rows: repeat(var(--rows), var(--cell-size));
