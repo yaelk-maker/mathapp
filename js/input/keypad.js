@@ -6,118 +6,75 @@
 //   actions: 'BACKSPACE', 'LEFT', 'RIGHT', 'UP', 'DOWN', 'EXIT', 'SPACE',
 //            'TOGGLE_KEYPAD'
 //
-// The keypad is a single flex row of 4 sections (vars / digits / ops /
-// arrows). Each section is a 5-row CSS grid; the last (5th) row holds the
-// action keys (mode-toggle, Space, ⌫) inline with the variable / digit /
-// arrow columns above them — no separate bottom bar.
-//
-// EXIT is kept as a code so the physical keyboard's Enter/Escape still
-// escapes a fraction/exponent, but there is no on-screen button for it any
-// more (the old ✓ key was visual clutter).
-//
-// `<` long-press → `≤`, `>` long-press → `≥`. The standalone ≤/≥ keys are
-// gone; the long-press hint sits as a small superscript on the < and > keys.
+// The whole keypad is a single 9-column × 5-row CSS grid spanning the full
+// editor width — no separate sections — so wide keys like Space (span 4),
+// ⌫/↑/↓/ABC/123 (span 2) sit cleanly across what used to be section
+// boundaries. KEYS is row-major; `span` widens a key over multiple grid
+// columns. EXIT is kept as a code so the physical Enter/Escape still
+// escapes a fraction/exponent. `<` long-press → `≤`, `>` long-press →
+// `≥`; the standalone keys are gone with a small superscript hint left
+// behind on `<` and `>`.
 
-// Each section: { name, cols, keys }. keys is a flat list, row-major; null
-// is a placeholder (renders as an invisible button so the grid keeps its
-// column structure). A button can set `span` to occupy multiple grid columns
-// (used for the wide ↑/↓/⌫ keys that sit above and below ←→).
-const SECTIONS = [
-  {
-    name: 'vars',
-    cols: 3,
-    keys: [
-      { code: 'SQUARE', label: 'a²', kind: 'comp', title: 'בריבוע' },
-      { code: 'POW', label: 'aᵇ', kind: 'comp', title: 'חזקה' },
-      { code: 'a', label: 'a', kind: 'var' },
-      { code: 'SQRT', label: '√', kind: 'comp', title: 'שורש' },
-      { code: 'NROOT', label: 'ⁿ√', kind: 'comp', title: 'שורש n-י' },
-      { code: 'b', label: 'b', kind: 'var' },
-      // Long-press < to type ≤; long-press > to type ≥. The tiny ≤/≥ glyph
-      // in the corner of the key is the discoverability hint — the kid sees
-      // "<" with a small "≤" badge and learns the gesture.
-      { code: '<', kind: 'op',
-        html: '<span class="keypad__longpress">≤</span><span class="keypad__main">&lt;</span>',
-        longPressCode: '≤', title: 'קטן (החזקה: ≤)' },
-      { code: '>', kind: 'op',
-        html: '<span class="keypad__longpress">≥</span><span class="keypad__main">&gt;</span>',
-        longPressCode: '≥', title: 'גדול (החזקה: ≥)' },
-      { code: 'x', label: 'x', kind: 'var' },
-      { code: 'y', label: 'y', kind: 'var' },
-      { code: '(', label: '(', kind: 'op' },
-      { code: ')', label: ')', kind: 'op' },
-      // Row 5 (bottom action band): Space spans cols 1-2 of vars (below y/(),
-      // |a| keeps its corner. The Space chunks across all four sections form
-      // a continuous band split only by ABC/123 in the digits column.
-      { code: 'SPACE', kind: 'space', label: 'Space', span: 2 },
-      { code: 'ABS', label: '|a|', kind: 'comp', title: 'ערך מוחלט' }
-    ]
-  },
-  {
-    name: 'digits',
-    cols: 3,
-    keys: [
-      { code: '7', label: '7' },
-      { code: '8', label: '8' },
-      { code: '9', label: '9' },
-      { code: '4', label: '4' },
-      { code: '5', label: '5' },
-      { code: '6', label: '6' },
-      { code: '1', label: '1' },
-      { code: '2', label: '2' },
-      { code: '3', label: '3' },
-      { code: '0', label: '0' },
-      { code: '.', label: '.', title: 'נקודה עשרונית' },
-      { code: '=', label: '=', kind: 'op' },
-      // Row 5: ABC/123 sits directly below "0", same width as a digit key.
-      // Space spans the remaining 2 cells (below "." and "=").
-      modeKey('מקלדת עברית'),
-      { code: 'SPACE', kind: 'space', label: 'Space', span: 2 }
-    ]
-  },
-  {
-    name: 'ops',
-    cols: 1,
-    keys: [
-      { code: '÷', label: '÷', kind: 'op' },
-      { code: '×', label: '×', kind: 'op' },
-      { code: '−', label: '−', kind: 'op' },
-      { code: '+', label: '+', kind: 'op' },
-      // Row 5: a final Space cell so the bottom band is continuous across
-      // digits → ops → up to where ⌫ takes over.
-      { code: 'SPACE', kind: 'space', label: '' }
-    ]
-  },
-  {
-    name: 'arrows',
-    cols: 2,
-    keys: [
-      { code: '%', label: '%', kind: 'op' },
-      // Render the fraction key as a true stacked a/b — a tiny bar between
-      // numerator and denominator — so it visually matches what the key
-      // produces in the grid (rather than the literal text "a/b").
-      {
-        code: 'FRAC',
-        kind: 'comp',
-        title: 'שבר',
-        html: '<span class="keypad__frac">'
-            + '<span class="keypad__frac-num">a</span>'
-            + '<span class="keypad__frac-bar"></span>'
-            + '<span class="keypad__frac-den">b</span>'
-            + '</span>'
-      },
-      { code: 'UP', label: '↑', kind: 'nav', span: 2 },
-      { code: 'LEFT', label: '←', kind: 'nav' },
-      { code: 'RIGHT', label: '→', kind: 'nav' },
-      // ↓ now mirrors ↑ — span 2, centered exactly under ←/→. The old ✓
-      // (EXIT) on-screen key is gone; Enter/Escape still escapes composites
-      // via keyboardEventToCode.
-      { code: 'DOWN', label: '↓', kind: 'nav', span: 2 },
-      // Row 5: ⌫ same width as ↓, directly below it.
-      { code: 'BACKSPACE', label: '⌫', kind: 'edit', span: 2,
-        title: 'מחק (החזקה למחיקה רציפה)', repeat: true }
-    ]
-  }
+const KEYS = [
+  // ── Row 1 ────────────────────────────────────────────────────────────
+  { code: 'SQUARE', label: 'a²', kind: 'comp', title: 'בריבוע' },
+  { code: 'POW', label: 'aᵇ', kind: 'comp', title: 'חזקה' },
+  { code: 'a', label: 'a', kind: 'var' },
+  { code: '7', label: '7' },
+  { code: '8', label: '8' },
+  { code: '9', label: '9' },
+  { code: '÷', label: '÷', kind: 'op' },
+  { code: 'BACKSPACE', label: '⌫', kind: 'edit', span: 2,
+    title: 'מחק (החזקה למחיקה רציפה)', repeat: true },
+  // ── Row 2 ────────────────────────────────────────────────────────────
+  { code: 'SQRT', label: '√', kind: 'comp', title: 'שורש' },
+  { code: 'NROOT', label: 'ⁿ√', kind: 'comp', title: 'שורש n-י' },
+  { code: 'b', label: 'b', kind: 'var' },
+  { code: '4', label: '4' },
+  { code: '5', label: '5' },
+  { code: '6', label: '6' },
+  { code: '×', label: '×', kind: 'op' },
+  { code: 'UP', label: '↑', kind: 'nav', span: 2 },
+  // ── Row 3 ────────────────────────────────────────────────────────────
+  // Long-press < to type ≤; long-press > to type ≥. The tiny ≤/≥ glyph
+  // in the corner of the key is the discoverability hint.
+  { code: '<', kind: 'op',
+    html: '<span class="keypad__longpress">≤</span><span class="keypad__main">&lt;</span>',
+    longPressCode: '≤', title: 'קטן (החזקה: ≤)' },
+  { code: '>', kind: 'op',
+    html: '<span class="keypad__longpress">≥</span><span class="keypad__main">&gt;</span>',
+    longPressCode: '≥', title: 'גדול (החזקה: ≥)' },
+  { code: 'x', label: 'x', kind: 'var' },
+  { code: '1', label: '1' },
+  { code: '2', label: '2' },
+  { code: '3', label: '3' },
+  { code: '−', label: '−', kind: 'op' },
+  { code: 'LEFT', label: '←', kind: 'nav' },
+  { code: 'RIGHT', label: '→', kind: 'nav' },
+  // ── Row 4 ────────────────────────────────────────────────────────────
+  { code: '(', label: '(', kind: 'op' },
+  { code: ')', label: ')', kind: 'op' },
+  { code: 'y', label: 'y', kind: 'var' },
+  { code: '0', label: '0' },
+  { code: '.', label: '.', title: 'נקודה עשרונית' },
+  { code: '=', label: '=', kind: 'op' },
+  { code: '+', label: '+', kind: 'op' },
+  { code: 'DOWN', label: '↓', kind: 'nav', span: 2 },
+  // ── Row 5 ────────────────────────────────────────────────────────────
+  // a/b fraction key rendered as a stacked numerator/bar/denominator so
+  // the glyph matches what the key inserts in the grid.
+  { code: 'FRAC', kind: 'comp', title: 'שבר',
+    html: '<span class="keypad__frac">'
+        + '<span class="keypad__frac-num">a</span>'
+        + '<span class="keypad__frac-bar"></span>'
+        + '<span class="keypad__frac-den">b</span>'
+        + '</span>' },
+  { code: '%', label: '%', kind: 'op' },
+  { code: 'ABS', label: '|a|', kind: 'comp', title: 'ערך מוחלט' },
+  { code: 'SPACE', label: 'Space', kind: 'space', span: 4 },
+  // Mode toggle inherits modeKey's stacked ABC/123 glyph; span 2 so it
+  // matches ⌫'s footprint directly above it.
+  Object.assign({}, modeKey('מקלדת עברית'), { span: 2 })
 ];
 
 export function renderKeypad({ onKey }) {
@@ -125,13 +82,12 @@ export function renderKeypad({ onKey }) {
   wrapper.className = 'keypad keypad--math';
   wrapper.setAttribute('dir', 'ltr');
 
-  const sectionsRow = document.createElement('div');
-  sectionsRow.className = 'keypad__sections';
-  for (const section of SECTIONS) {
-    sectionsRow.appendChild(buildSection(section, onKey));
+  const grid = document.createElement('div');
+  grid.className = 'keypad__grid';
+  for (const button of KEYS) {
+    grid.appendChild(makeKey(button, onKey));
   }
-  wrapper.appendChild(sectionsRow);
-
+  wrapper.appendChild(grid);
   return wrapper;
 }
 
@@ -148,6 +104,10 @@ export function modeKey(title) {
 }
 
 export function buildSection(section, onKey) {
+  // Legacy helper kept exported only because external code may still import
+  // it. The math keypad now lays out on a single 9×5 grid (see KEYS), but
+  // hebrew-keypad.js still uses makeKey/modeKey directly. Safe to remove
+  // once nothing outside this module imports buildSection.
   const el = document.createElement('div');
   el.className = `keypad__section keypad__section--${section.name}`;
   el.style.gridTemplateColumns = `repeat(${section.cols}, 1fr)`;
