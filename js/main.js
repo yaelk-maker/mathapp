@@ -95,16 +95,24 @@ async function renderHome() {
   `;
 
   document.getElementById('new-notebook').addEventListener('click', async () => {
-    const count = (await listNotebooks()).length;
-    const name = await promptDialog({
-      title: 'מחברת חדשה',
-      body: 'בחרי שם למחברת:',
-      defaultValue: `מחברת ${count + 1}`,
-      confirmLabel: 'יצירה'
-    });
-    if (name == null || !name.trim()) return;
-    const nb = await createNotebook(name.trim());
-    window.location.hash = `#/notebook/${nb.id}`;
+    try {
+      const count = (await listNotebooks()).length;
+      const name = await promptDialog({
+        title: 'מחברת חדשה',
+        body: 'בחרי שם למחברת:',
+        defaultValue: `מחברת ${count + 1}`,
+        confirmLabel: 'יצירה'
+      });
+      if (name == null || !name.trim()) return;
+      const nb = await createNotebook(name.trim());
+      window.location.hash = `#/notebook/${nb.id}`;
+    } catch (err) {
+      console.error('Create notebook failed:', err);
+      // Without this surface the click silently fails on the kid (notably
+      // when IDB rejects the create transaction). A Hebrew toast at least
+      // tells her something actually went wrong.
+      toast('יצירת המחברת נכשלה — נסי שוב.', { kind: 'error', duration: 3600 });
+    }
   });
 
   document.getElementById('restore-all').addEventListener('click', async () => {

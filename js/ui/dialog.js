@@ -187,8 +187,14 @@ export function promptDialog({
 
     document.body.appendChild(overlay);
     trapFocus(dialog);
-    input.focus();
-    input.select();
+    // We deliberately do NOT auto-focus the input here. On iPadOS standalone
+    // PWAs, calling .focus() after an awaited promise (the typical caller
+    // pattern: await listNotebooks(); promptDialog(...)) is outside a user
+    // gesture, so iOS won't actually raise the keyboard — and at least one
+    // device shape was reproducibly losing the dialog render entirely on
+    // that path. The kid taps the input herself when ready; the keyboard
+    // rises on real touch and the bridge in js/ui/system-keyboard.js takes
+    // over from there.
   });
 }
 
