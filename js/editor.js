@@ -133,29 +133,35 @@ export async function mountEditor(root, notebookId) {
   const pendingStrokeSaves = new Set();
 
   root.innerHTML = `
-    <div class="editor editor--full">
-      <div class="editor__topbar">
-        <button class="editor__back" id="back-home" aria-label="חזרה">← <span class="label">חזרה</span></button>
-        <h2 class="editor__title" id="title"></h2>
-        <button class="btn btn--ghost" id="rename"><span class="label">שנה שם</span></button>
-      </div>
-      <div class="editor__actions">
-        <button class="btn btn--ghost" id="upload-photo" aria-label="צלם דף">📷 <span class="label">צלם דף</span></button>
-        <button class="btn btn--ghost" id="upload-library" aria-label="בחר תמונה">🖼️ <span class="label">בחר תמונה</span></button>
-        <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
-        <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
-        <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
-        <span class="editor__sep"></span>
-        <button class="btn btn--ghost" id="toggle-pen" aria-label="ציור">✏️ <span class="label">ציור</span></button>
-        <span class="pen-tools" id="pen-tools" hidden>
-          ${PEN_COLORS.map(
-            (c, i) => `<button class="pen-color ${i === 0 ? 'pen-color--active' : ''}"
-              style="background:${c}" data-color="${c}" aria-label="צבע"></button>`
-          ).join('')}
-          <button class="btn btn--ghost" id="toggle-eraser" aria-label="מחק">🧽 <span class="label">מחק</span></button>
-          <button class="btn btn--ghost" id="undo-stroke" aria-label="בטל">↶ <span class="label">בטל</span></button>
-          <button class="btn btn--ghost" id="clear-strokes" aria-label="נקה ציורים">🗑️ <span class="label">נקה ציורים</span></button>
-        </span>
+    <div class="editor editor--full editor--chrome-collapsed">
+      <button class="editor__chrome-toggle" id="chrome-toggle" type="button"
+              aria-label="הצג סרגל כלים" title="הצג סרגל כלים">≡</button>
+      <div class="editor__chrome" id="editor-chrome">
+        <div class="editor__topbar">
+          <button class="editor__back" id="back-home" aria-label="חזרה">← <span class="label">חזרה</span></button>
+          <h2 class="editor__title" id="title"></h2>
+          <button class="btn btn--ghost" id="rename"><span class="label">שנה שם</span></button>
+          <button class="editor__chrome-close" id="chrome-close" type="button"
+                  aria-label="סגור סרגל כלים" title="סגור סרגל כלים">×</button>
+        </div>
+        <div class="editor__actions">
+          <button class="btn btn--ghost" id="upload-photo" aria-label="צלם דף">📷 <span class="label">צלם דף</span></button>
+          <button class="btn btn--ghost" id="upload-library" aria-label="בחר תמונה">🖼️ <span class="label">בחר תמונה</span></button>
+          <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
+          <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
+          <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
+          <span class="editor__sep"></span>
+          <button class="btn btn--ghost" id="toggle-pen" aria-label="ציור">✏️ <span class="label">ציור</span></button>
+          <span class="pen-tools" id="pen-tools" hidden>
+            ${PEN_COLORS.map(
+              (c, i) => `<button class="pen-color ${i === 0 ? 'pen-color--active' : ''}"
+                style="background:${c}" data-color="${c}" aria-label="צבע"></button>`
+            ).join('')}
+            <button class="btn btn--ghost" id="toggle-eraser" aria-label="מחק">🧽 <span class="label">מחק</span></button>
+            <button class="btn btn--ghost" id="undo-stroke" aria-label="בטל">↶ <span class="label">בטל</span></button>
+            <button class="btn btn--ghost" id="clear-strokes" aria-label="נקה ציורים">🗑️ <span class="label">נקה ציורים</span></button>
+          </span>
+        </div>
       </div>
       <div class="editor__page" id="page-scroll">
         <div class="pen-mode-indicator">✏️ מצב ציור פעיל</div>
@@ -165,9 +171,12 @@ export async function mountEditor(root, notebookId) {
         </div>
       </div>
       <div class="editor__keypad-host" id="keypad-host">
-        <span class="keypad-mode-badge" id="keypad-mode-badge" aria-live="polite">מצב: מתמטיקה</span>
+        <button class="editor__keypad-handle" id="keypad-handle" type="button"
+                aria-label="כווץ מקלדת" title="גרור מטה כדי לסגור">▾</button>
         <div id="keypad-host-inner"></div>
       </div>
+      <button class="editor__keypad-show" id="keypad-show" type="button"
+              aria-label="הצג מקלדת" title="הצג מקלדת" hidden>⌨</button>
     </div>
   `;
 
@@ -259,7 +268,9 @@ export async function mountEditor(root, notebookId) {
     window.print();
   });
 
-  // Pencil toolbar wiring
+  // Pencil toolbar wiring. Pen mode also auto-collapses the math keypad —
+  // it isn't used while drawing and reclaiming that ~40% of vertical space
+  // is the single biggest win in split view.
   const penToolsEl = document.getElementById('pen-tools');
   const penToggleBtn = document.getElementById('toggle-pen');
   penToggleBtn.addEventListener('click', () => {
@@ -267,6 +278,8 @@ export async function mountEditor(root, notebookId) {
     penToggleBtn.classList.toggle('btn--active', pencilEnabled);
     penToolsEl.hidden = !pencilEnabled;
     canvas.classList.toggle('pencil-canvas--active', pencilEnabled);
+    setKeypadCollapsed(pencilEnabled);
+    requestAnimationFrame(() => resizeAndReplay());
   });
 
   document.getElementById('toggle-eraser').addEventListener('click', (e) => {
@@ -294,20 +307,82 @@ export async function mountEditor(root, notebookId) {
   await renderBlocks();
 
   const keypadHost = document.getElementById('keypad-host-inner');
-  const keypadModeBadge = document.getElementById('keypad-mode-badge');
 
   function mountKeypad() {
     keypadHost.innerHTML = '';
     if (keypadMode === 'hebrew') {
       keypadHost.appendChild(renderHebrewKeypad({ onKey: handleHebrewKey }));
-      keypadModeBadge.textContent = 'מצב: עברית';
-      keypadModeBadge.classList.add('keypad-mode-badge--hebrew');
+      editorEl.classList.add('editor--hebrew-mode');
     } else {
       keypadHost.appendChild(renderKeypad({ onKey: handleKey }));
-      keypadModeBadge.textContent = 'מצב: מתמטיקה';
-      keypadModeBadge.classList.remove('keypad-mode-badge--hebrew');
+      editorEl.classList.remove('editor--hebrew-mode');
     }
   }
+
+  // ---- Chrome (topbar+actions) auto-hide ----
+  // The chrome eats two rows in split view. Hide it by default and let the
+  // kid open it on demand via the floating ≡ button. Re-collapses after a
+  // few seconds of no interaction.
+  const chromeEl = document.getElementById('editor-chrome');
+  const chromeToggleBtn = document.getElementById('chrome-toggle');
+  const chromeCloseBtn = document.getElementById('chrome-close');
+  let chromeAutoHideTimer = null;
+  const CHROME_AUTOHIDE_MS = 4000;
+  function setChromeOpen(open) {
+    editorEl.classList.toggle('editor--chrome-collapsed', !open);
+    chromeToggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (chromeAutoHideTimer) {
+      clearTimeout(chromeAutoHideTimer);
+      chromeAutoHideTimer = null;
+    }
+    if (open) {
+      chromeAutoHideTimer = setTimeout(() => {
+        editorEl.classList.add('editor--chrome-collapsed');
+        chromeAutoHideTimer = null;
+      }, CHROME_AUTOHIDE_MS);
+      requestAnimationFrame(() => resizeAndReplay());
+    } else {
+      requestAnimationFrame(() => resizeAndReplay());
+    }
+  }
+  chromeToggleBtn.addEventListener('click', () =>
+    setChromeOpen(editorEl.classList.contains('editor--chrome-collapsed'))
+  );
+  chromeCloseBtn.addEventListener('click', () => setChromeOpen(false));
+  // Any click inside the chrome restarts the auto-hide timer so the kid
+  // doesn't lose the toolbar mid-task.
+  chromeEl.addEventListener('pointerdown', () => {
+    if (!editorEl.classList.contains('editor--chrome-collapsed')) {
+      // refresh timer
+      setChromeOpen(true);
+    }
+  });
+
+  // ---- Keypad collapse (pen mode + manual handle) ----
+  const keypadHandleBtn = document.getElementById('keypad-handle');
+  const keypadShowBtn = document.getElementById('keypad-show');
+  function setKeypadCollapsed(collapsed) {
+    editorEl.classList.toggle('editor--keypad-collapsed', collapsed);
+    keypadShowBtn.hidden = !collapsed;
+    requestAnimationFrame(() => resizeAndReplay());
+  }
+  keypadHandleBtn.addEventListener('click', () => setKeypadCollapsed(true));
+  keypadShowBtn.addEventListener('click', () => setKeypadCollapsed(false));
+  // Drag the handle down to dismiss — feels native on iPadOS.
+  let handleDragStartY = null;
+  keypadHandleBtn.addEventListener('pointerdown', (e) => {
+    handleDragStartY = e.clientY;
+  });
+  keypadHandleBtn.addEventListener('pointermove', (e) => {
+    if (handleDragStartY == null) return;
+    if (e.clientY - handleDragStartY > 24) {
+      setKeypadCollapsed(true);
+      handleDragStartY = null;
+    }
+  });
+  const endHandleDrag = () => { handleDragStartY = null; };
+  keypadHandleBtn.addEventListener('pointerup', endHandleDrag);
+  keypadHandleBtn.addEventListener('pointercancel', endHandleDrag);
 
   function setKeypadMode(mode) {
     if (mode === keypadMode) return;
@@ -450,7 +525,9 @@ export async function mountEditor(root, notebookId) {
       if (end > used) used = end;
     }
     chip.textContent = `↔ ${used}/${block.cols}`;
-    chip.classList.toggle('workblock__cols--full', used >= block.cols);
+    // Only surface the chip when the kid is close to or at capacity — the
+    // CSS hides it entirely otherwise so the workblock stays uncluttered.
+    chip.classList.toggle('workblock__cols--full', used >= Math.ceil(block.cols * 0.8));
   }
 
   function refreshActiveColsChip() {

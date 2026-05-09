@@ -40,9 +40,22 @@ export async function renderWorksheetBlock(block, options = {}) {
     del.textContent = '✕';
     del.title = 'הסר דף';
     del.setAttribute('aria-label', 'הסר דף');
-    del.addEventListener('click', () => options.onDelete(block.id));
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      options.onDelete(block.id);
+    });
     wrapper.appendChild(del);
   }
+
+  // Tap-to-collapse: in split view, tapping the worksheet shrinks it to a
+  // thumbnail so the work block claims the freed space. Tap again to peek
+  // back. The class is namespaced on the wrapper itself so split-mode CSS
+  // picks it up; in non-split mode the class is harmless (the rules are
+  // gated on `.editor--split`).
+  wrapper.addEventListener('click', (e) => {
+    if (e.target.closest('.worksheet__delete') || e.target.closest('.block__handle')) return;
+    wrapper.classList.toggle('worksheet--collapsed');
+  });
 
   return wrapper;
 }
