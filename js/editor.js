@@ -420,7 +420,42 @@ export async function mountEditor(root, notebookId) {
   // wrapper after a fraction widens, and would otherwise drop the handles).
   function attachBlockChrome(el, block) {
     attachBlockDragHandle(el, block);
-    if (block.type === BLOCK.WORK) attachWorkBlockResize(el, block);
+    if (block.type === BLOCK.WORK) {
+      attachWorkBlockResize(el, block);
+      attachWorkBlockColsChip(el, block);
+    }
+  }
+
+  // Small "{used}/{cols}" chip on the top-end of a work block. Shows how much
+  // of the cursor row is filled, and turns amber when the row is at capacity
+  // so the kid sees space pressure before they hit a refusal.
+  function attachWorkBlockColsChip(wrapper, block) {
+    const chip = document.createElement('span');
+    chip.className = 'workblock__cols';
+    chip.setAttribute('aria-hidden', 'true');
+    wrapper.appendChild(chip);
+    refreshColsChip(wrapper, block);
+  }
+
+  function refreshColsChip(wrapper, block) {
+    if (!wrapper) return;
+    const chip = wrapper.querySelector('.workblock__cols');
+    if (!chip) return;
+    const row = (activeWorkBlock === block) ? cursor.r : 0;
+    let used = 0;
+    for (const [key, cell] of Object.entries(block.cells)) {
+      const [rr, cc] = key.split(',').map(Number);
+      if (rr !== row) continue;
+      const end = cc + compositeWidth(cell);
+      if (end > used) used = end;
+    }
+    chip.textContent = `↔ ${used}/${block.cols}`;
+    chip.classList.toggle('workblock__cols--full', used >= block.cols);
+  }
+
+  function refreshActiveColsChip() {
+    if (!activeGrid || !activeWorkBlock) return;
+    refreshColsChip(activeGrid.parentElement, activeWorkBlock);
   }
 
   // Apply a block's persisted horizontal offset (set by drag-to-reposition).
@@ -1029,9 +1064,25 @@ export async function mountEditor(root, notebookId) {
   function insertCharRTL(ch) {
     const r = cursor.r;
     const c = cursor.c;
+    // Mirror of insertChar's edge guard: the Hebrew cursor advances LEFT, so
+    // the "edge" here is c === 0. Refuse when the kid would otherwise silently
+    // overwrite the cell parked at column 0.
+    const occupiedHere = !!activeWorkBlock.cells[`${r},${c}`];
+    const atLeftEdge = c <= 0;
+    if (occupiedHere && atLeftEdge) {
+      flashRefuse(r, c, { reason: 'edge' });
+      notifyAtomEdge();
+      return;
+    }
+
     activeWorkBlock.cells[`${r},${c}`] = { ch };
     updateCell(activeGrid, activeWorkBlock, r, c);
-    if (c > 0) moveCursor(r, c - 1);
+    if (c > 0) {
+      moveCursor(r, c - 1);
+    } else {
+      flashRefuse(r, c, { reason: 'edge' });
+      notifyAtomEdge();
+    }
     queueSave();
   }
 
@@ -1111,9 +1162,28 @@ export async function mountEditor(root, notebookId) {
       }
     }
 
+    // Refuse if the current cell is already filled (cursor parked there because
+    // the previous press could not advance past the right edge). Without this
+    // guard subsequent presses would silently overwrite the parked cell — the
+    // kid sees the last char they typed get clobbered with no feedback.
+    const occupiedHere = !!activeWorkBlock.cells[`${r},${c}`];
+    const atRightEdge = c + 1 >= activeWorkBlock.cols;
+    if (occupiedHere && atRightEdge) {
+      flashRefuse(r, c, { reason: 'edge' });
+      notifyAtomEdge();
+      return;
+    }
+
     activeWorkBlock.cells[`${r},${c}`] = { ch };
     updateCell(activeGrid, activeWorkBlock, r, c);
-    if (c + 1 < activeWorkBlock.cols) moveCursor(r, c + 1);
+    if (c + 1 < activeWorkBlock.cols) {
+      moveCursor(r, c + 1);
+    } else {
+      // Cell accepted but cursor cannot advance — warn now, before the next
+      // press would overwrite. The toast is throttled inside notifyAtomEdge.
+      flashRefuse(r, c, { reason: 'edge' });
+      notifyAtomEdge();
+    }
     queueSave();
   }
 
@@ -1133,7 +1203,7 @@ export async function mountEditor(root, notebookId) {
       for (let i = oldWidth; i < newWidth; i += 1) {
         const nextC = c + i;
         if (nextC >= activeWorkBlock.cols) {
-          flashRefuse(r, c);
+          flashRefuse(r, c, { reason: 'edge' });
           notifyFractionEdge();
           return;
         }
@@ -1171,6 +1241,22 @@ export async function mountEditor(root, notebookId) {
     });
   }
 
+  // Same idea for plain atoms hitting the right (or left, in Hebrew) edge.
+  // Without it the cursor parks on the last cell and the next press silently
+  // overwrites — a quiet failure mode that's especially bad for a kid with a
+  // writing disability. Throttled separately from the fraction toast so the
+  // two messages don't suppress each other.
+  let lastAtomEdgeToastAt = 0;
+  function notifyAtomEdge() {
+    const now = Date.now();
+    if (now - lastAtomEdgeToastAt < 5000) return;
+    lastAtomEdgeToastAt = now;
+    toast('הגעת לסוף השורה — גררי את הפינה ⤡ כדי להרחיב, או עברי לשורה הבאה.', {
+      kind: 'warn',
+      duration: 3600
+    });
+  }
+
   // POW pressed inside a slot: cycle the trailing superscript digit (²→³→⁴…)
   // if present, otherwise append ². The kid taps once for square, twice for
   // cube, etc., without us needing a separate key per power.
@@ -1199,13 +1285,30 @@ export async function mountEditor(root, notebookId) {
     queueSave();
   }
 
-  // Briefly flash a cell red to indicate "no room — input refused".
-  function flashRefuse(r, c) {
+  // Briefly flash a cell red to indicate "no room — input refused". When the
+  // refusal is because we hit the grid edge (vs. a neighbor cell being taken),
+  // also pulse the resize handle so the kid's eye is drawn to the recovery
+  // affordance — without that, the ⤡ glyph is easy to miss in the corner.
+  function flashRefuse(r, c, { reason } = {}) {
     if (!activeGrid) return;
     const el = activeGrid.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
-    if (!el) return;
-    el.classList.add('cell--refuse');
-    setTimeout(() => el.classList.remove('cell--refuse'), 260);
+    if (el) {
+      el.classList.add('cell--refuse');
+      setTimeout(() => el.classList.remove('cell--refuse'), 260);
+    }
+    if (reason === 'edge') pulseResizeHandle();
+  }
+
+  function pulseResizeHandle() {
+    const wrapper = activeGrid && activeGrid.parentElement;
+    if (!wrapper) return;
+    const handle = wrapper.querySelector('.workblock__resize');
+    if (!handle) return;
+    handle.classList.remove('workblock__resize--pulse');
+    // Force reflow so the animation restarts even on rapid repeat refusals.
+    void handle.offsetWidth;
+    handle.classList.add('workblock__resize--pulse');
+    setTimeout(() => handle.classList.remove('workblock__resize--pulse'), 1200);
   }
 
   function insertComposite(template) {
@@ -1228,6 +1331,30 @@ export async function mountEditor(root, notebookId) {
       // FRAC (or any unhandled composite): exit and create new outside.
       exitComposite(1);
       return insertComposite(template);
+    }
+
+    // Special UX for fractions: when FRAC is pressed while pointing at a cell
+    // that already holds an atom, promote that atom into the numerator and
+    // leave the denominator blank — cursor lands in the den slot ready for
+    // input. This matches how a kid writes "5 over what?" on paper.
+    //
+    // We only promote when the cursor is ON a filled atom cell. The "atom is
+    // to the left" case is intentionally NOT handled (unlike POW), because
+    // after typing an atom the cursor advances past it, and pressing FRAC
+    // there should create a fresh fraction in the *empty* cell — not retro-
+    // actively swallow the previous character.
+    {
+      const here = getCellAt(r, c);
+      if (template.type === 'fraction' && here && here.ch != null) {
+        const promoted = { type: 'fraction', num: here.ch, den: '' };
+        activeWorkBlock.cells[`${r},${c}`] = promoted;
+        // Promoted fraction's width may be 1 (single-char num, empty den) so
+        // a full grid rerender is unnecessary; updateCell repaints in place.
+        updateCell(activeGrid, activeWorkBlock, r, c);
+        moveCursorTo(r, c, 'den');
+        queueSave();
+        return;
+      }
     }
 
     // Special UX for exponents: when typed right after an atom, "promote"
@@ -1275,8 +1402,12 @@ export async function mountEditor(root, notebookId) {
     let targetC = c;
     if (existing) {
       targetC = c + compositeWidth(existing);
+      if (targetC >= activeWorkBlock.cols) {
+        flashRefuse(r, c, { reason: 'edge' });
+        notifyAtomEdge();
+        return;
+      }
       if (
-        targetC >= activeWorkBlock.cols ||
         activeWorkBlock.cells[`${targetR},${targetC}`] ||
         findOccupyingAnchor(activeWorkBlock, targetR, targetC)
       ) {
@@ -1478,6 +1609,7 @@ export async function mountEditor(root, notebookId) {
     cursor.c = nc;
     cursor.slot = effectiveSlot;
     updateCursor(activeGrid, prev, cursor, getCellAt);
+    if (prev.r !== nr) refreshActiveColsChip();
   }
 
   // Re-render just the active work block in place. Used when a fraction's
@@ -1520,6 +1652,9 @@ export async function mountEditor(root, notebookId) {
   function queueSave() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(doSave, SAVE_DEBOUNCE_MS);
+    // Cell content changed — chip may need to flip amber, so refresh now
+    // (cheap O(cells-on-row) scan, no DOM rerender).
+    refreshActiveColsChip();
   }
 
   // Returns a Promise that resolves once any pending save has been awaited.

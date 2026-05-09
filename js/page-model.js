@@ -20,7 +20,11 @@ export const COMPOSITE = Object.freeze({
   ABS: 'abs'
 });
 
-export const DEFAULT_GRID = Object.freeze({ rows: 14, cols: 18 });
+// 24 cols comfortably fits a distribution line like
+//   6x−3(2x−3)>(x+4)−4(x−1)
+// (22 atoms) without forcing the kid to discover the resize handle mid-thought.
+// Empty width can still be trimmed by dragging the resize handle.
+export const DEFAULT_GRID = Object.freeze({ rows: 14, cols: 24 });
 
 let _counter = 0;
 function blockId() {
