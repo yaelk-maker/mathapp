@@ -19,6 +19,12 @@ function isFocusableInput(target) {
   const tag = target.tagName;
   if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false;
   if (target.type === 'hidden' || target.disabled || target.readOnly) return false;
+  // Inputs that live inside a modal dialog are already correctly anchored by
+  // the dialog itself — we don't need (or want) the body-level keyboard
+  // bridge to repaint their host. Skipping these also avoids a layout
+  // shift mid-dialog-render on iPadOS that was making create/rename feel
+  // like nothing happened.
+  if (target.closest && target.closest('.dialog')) return false;
   return true;
 }
 
