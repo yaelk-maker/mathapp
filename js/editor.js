@@ -141,10 +141,14 @@ export async function mountEditor(root, notebookId) {
           <button class="editor__back" id="back-home" aria-label="חזרה">← <span class="label">חזרה</span></button>
           <h2 class="editor__title" id="title"></h2>
           <button class="btn btn--ghost" id="rename"><span class="label">שנה שם</span></button>
+          <button class="editor__chrome-pin" id="chrome-pin" type="button"
+                  aria-label="נעץ סרגל" title="נעץ את הסרגל פתוח">📌</button>
           <button class="editor__chrome-close" id="chrome-close" type="button"
                   aria-label="סגור סרגל כלים" title="סגור סרגל כלים">×</button>
         </div>
         <div class="editor__actions">
+          <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↶ <span class="label">ביטול</span></button>
+          <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="upload-photo" aria-label="צלם דף">📷 <span class="label">צלם דף</span></button>
           <button class="btn btn--ghost" id="upload-library" aria-label="בחר תמונה">🖼️ <span class="label">בחר תמונה</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
@@ -358,33 +362,60 @@ export async function mountEditor(root, notebookId) {
   // ---- Chrome (topbar+actions) auto-hide ----
   // The chrome eats two rows in split view. Hide it by default and let the
   // kid open it on demand via the floating ≡ button. Re-collapses after a
-  // few seconds of no interaction.
+  // few seconds of no interaction — unless the kid pins it open with 📌.
   const chromeEl = document.getElementById('editor-chrome');
   const chromeToggleBtn = document.getElementById('chrome-toggle');
   const chromeCloseBtn = document.getElementById('chrome-close');
+  const chromePinBtn = document.getElementById('chrome-pin');
   let chromeAutoHideTimer = null;
   const CHROME_AUTOHIDE_MS = 4000;
+  let chromePinned = localStorage.getItem('mathapp.chromePinned') === '1';
+  // Pinned chrome starts open; otherwise the editor's static class
+  // editor--chrome-collapsed keeps it closed until the kid opens it.
+  if (chromePinned) editorEl.classList.remove('editor--chrome-collapsed');
+  chromePinBtn.classList.toggle('btn--active', chromePinned);
+  chromePinBtn.setAttribute('aria-pressed', chromePinned ? 'true' : 'false');
   function setChromeOpen(open) {
+    // Pinned: stay open. Manual close still works (user can unpin via 📌
+    // and then close, or just toggle pin off).
+    if (chromePinned && !open) return;
     editorEl.classList.toggle('editor--chrome-collapsed', !open);
     chromeToggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (chromeAutoHideTimer) {
       clearTimeout(chromeAutoHideTimer);
       chromeAutoHideTimer = null;
     }
-    if (open) {
+    if (open && !chromePinned) {
       chromeAutoHideTimer = setTimeout(() => {
         editorEl.classList.add('editor--chrome-collapsed');
         chromeAutoHideTimer = null;
       }, CHROME_AUTOHIDE_MS);
-      requestAnimationFrame(() => resizeAndReplay());
-    } else {
-      requestAnimationFrame(() => resizeAndReplay());
     }
+    requestAnimationFrame(() => resizeAndReplay());
   }
   chromeToggleBtn.addEventListener('click', () =>
     setChromeOpen(editorEl.classList.contains('editor--chrome-collapsed'))
   );
   chromeCloseBtn.addEventListener('click', () => setChromeOpen(false));
+  chromePinBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    chromePinned = !chromePinned;
+    localStorage.setItem('mathapp.chromePinned', chromePinned ? '1' : '0');
+    chromePinBtn.classList.toggle('btn--active', chromePinned);
+    chromePinBtn.setAttribute('aria-pressed', chromePinned ? 'true' : 'false');
+    if (chromePinned) {
+      // Pin while open: cancel pending auto-hide so it doesn't close.
+      if (chromeAutoHideTimer) {
+        clearTimeout(chromeAutoHideTimer);
+        chromeAutoHideTimer = null;
+      }
+      editorEl.classList.remove('editor--chrome-collapsed');
+    } else {
+      // Unpinning while chrome is visible: restart the auto-hide grace
+      // period so the chrome doesn't disappear out from under the kid.
+      setChromeOpen(true);
+    }
+  });
   // Any click inside the chrome restarts the auto-hide timer so the kid
   // doesn't lose the toolbar mid-task.
   chromeEl.addEventListener('pointerdown', () => {
@@ -632,6 +663,11 @@ export async function mountEditor(root, notebookId) {
       const grid = wrapper.querySelector('.grid');
       const cellSize =
         parseFloat(getComputedStyle(grid).getPropertyValue('--cell-size')) || 38;
+      // Capture pre-resize state so the kid can undo the gesture. Resize
+      // mutates rows/cols incrementally during pointermove, so the snapshot
+      // has to be taken BEFORE the drag starts. If the gesture turns out to
+      // be a no-op, dedup-on-undo handles the redundant entry.
+      pushUndo();
       state = {
         pointerId: e.pointerId,
         startX: e.clientX,
@@ -707,6 +743,11 @@ export async function mountEditor(root, notebookId) {
   function startBlockDrag(downEvent, el, block, handle) {
     downEvent.preventDefault();
     handle.setPointerCapture(downEvent.pointerId);
+
+    // Capture state BEFORE the reorder gesture commits so undo can revert
+    // the move. If the kid releases without moving anything, dedup keeps
+    // the stack clean.
+    pushUndo();
 
     const blocksContainer = pageHost;
     const startX = downEvent.clientX;
@@ -832,6 +873,7 @@ export async function mountEditor(root, notebookId) {
   async function addWorksheet({ capture }) {
     const ws = await uploadWorksheet({ capture });
     if (!ws) return;
+    pushUndo();
     const workIndex = page.blocks.findIndex((b) => b.type === BLOCK.WORK);
     if (workIndex < 0) page.blocks.push(ws);
     else page.blocks.splice(workIndex, 0, ws);
@@ -851,6 +893,7 @@ export async function mountEditor(root, notebookId) {
       destructive: true
     });
     if (!ok) return;
+    pushUndo();
 
     // Delete any strokes that belong to this block. Strokes anchored to the
     // block by id (the modern path) are removed directly. Legacy unanchored
@@ -895,6 +938,7 @@ export async function mountEditor(root, notebookId) {
   }
 
   async function addWorkBlock() {
+    pushUndo();
     page.blocks.push(newWorkBlock());
     await savePage(page);
     await renderBlocks();
@@ -910,6 +954,7 @@ export async function mountEditor(root, notebookId) {
       toast('הגעת למספר השורות המרבי.', { kind: 'warn', duration: 2400 });
       return;
     }
+    pushUndo();
     const r = cursor.r;
     const newCells = {};
     for (const [key, cell] of Object.entries(activeWorkBlock.cells)) {
@@ -931,6 +976,7 @@ export async function mountEditor(root, notebookId) {
       toast('לא ניתן לרדת מתחת לשתי שורות.', { kind: 'warn', duration: 2400 });
       return;
     }
+    pushUndo();
     const r = cursor.r;
     const newCells = {};
     for (const [key, cell] of Object.entries(activeWorkBlock.cells)) {
@@ -955,6 +1001,7 @@ export async function mountEditor(root, notebookId) {
       toast('הגעת למספר העמודות המרבי.', { kind: 'warn', duration: 2400 });
       return;
     }
+    pushUndo();
     const c = cursor.c;
     const newCells = {};
     for (const [key, cell] of Object.entries(activeWorkBlock.cells)) {
@@ -977,6 +1024,7 @@ export async function mountEditor(root, notebookId) {
       toast('לא ניתן לרדת מתחת לארבע עמודות.', { kind: 'warn', duration: 2400 });
       return;
     }
+    pushUndo();
     const c = cursor.c;
     const newCells = {};
     for (const [key, cell] of Object.entries(activeWorkBlock.cells)) {
@@ -999,6 +1047,7 @@ export async function mountEditor(root, notebookId) {
   // they were.
   async function movePartAndSave(block, part, drow, dcol) {
     if (drow === 0 && dcol === 0) return;
+    pushUndo();
     const moves = [];
     for (let c = part.startCol; c <= part.endCol; c += 1) {
       const cell = block.cells[`${part.row},${c}`];
@@ -1275,6 +1324,7 @@ export async function mountEditor(root, notebookId) {
   // Same as insertChar but advances the cursor LEFT (toward c=0) instead of
   // right. Used by the Hebrew keypad so typed text reads right-to-left.
   function insertCharRTL(ch) {
+    pushUndo();
     const r = cursor.r;
     const c = cursor.c;
     // Mirror of insertChar's edge guard: the Hebrew cursor advances LEFT, so
@@ -1303,6 +1353,7 @@ export async function mountEditor(root, notebookId) {
   // cursor (because typing advances left). Delete it, then place the cursor
   // there so the next press overwrites in place.
   function backspaceRTL() {
+    pushUndo();
     const r = cursor.r;
     const c = cursor.c;
     const here = getCellAt(r, c);
@@ -1353,6 +1404,7 @@ export async function mountEditor(root, notebookId) {
   }
 
   function insertChar(ch) {
+    pushUndo();
     const r = cursor.r;
     const c = cursor.c;
     const cell = getCellAt(r, c);
@@ -1565,6 +1617,7 @@ export async function mountEditor(root, notebookId) {
   }
 
   function insertComposite(template) {
+    pushUndo();
     const r = cursor.r;
     const c = cursor.c;
     if (cursor.slot) {
@@ -1681,6 +1734,7 @@ export async function mountEditor(root, notebookId) {
   }
 
   function backspace() {
+    pushUndo();
     const r = cursor.r;
     const c = cursor.c;
     const here = getCellAt(r, c);
@@ -1902,6 +1956,74 @@ export async function mountEditor(root, notebookId) {
     if (!activeGrid || !activeWorkBlock) return;
     const getCellAt = (rr, cc) => activeWorkBlock.cells[`${rr},${cc}`];
     updateCursor(activeGrid, cursor, null, getCellAt);
+  }
+
+  // ---------- undo history ----------
+  // Page-level undo: snapshots the page's blocks, the cursor, and the id of
+  // the active work block before each mutating action. The "↶ ביטול" button
+  // pops the most recent snapshot and restores it. Strokes are NOT covered
+  // here — the pen tools have their own dedicated undo for drawings.
+  const undoStack = [];
+  const MAX_UNDO = 80;
+  const undoBtn = document.getElementById('undo-edit');
+
+  function snapshotState() {
+    return JSON.stringify({
+      blocks: page.blocks,
+      cursor: { r: cursor.r, c: cursor.c, slot: cursor.slot },
+      activeBlockId: activeWorkBlock ? activeWorkBlock.id : null
+    });
+  }
+
+  // Capture pre-mutation state. Dedup against the top of the stack so that
+  // refused presses (no actual mutation) don't pile up identical snapshots
+  // and force the kid to undo five times for one visible step.
+  function pushUndo() {
+    const snapshot = snapshotState();
+    if (undoStack.length > 0 && undoStack[undoStack.length - 1] === snapshot) {
+      return;
+    }
+    undoStack.push(snapshot);
+    if (undoStack.length > MAX_UNDO) undoStack.shift();
+    refreshUndoButton();
+  }
+
+  function refreshUndoButton() {
+    if (!undoBtn) return;
+    undoBtn.disabled = undoStack.length === 0;
+  }
+
+  async function undo() {
+    if (undoStack.length === 0) return;
+    // Drop any leading snapshots that match the current state — defensive in
+    // case a snapshot was pushed and the mutator that followed turned out to
+    // be a no-op. The first visible undo should always change something.
+    while (undoStack.length > 0 && undoStack[undoStack.length - 1] === snapshotState()) {
+      undoStack.pop();
+    }
+    if (undoStack.length === 0) {
+      refreshUndoButton();
+      return;
+    }
+    const restored = JSON.parse(undoStack.pop());
+    page.blocks = restored.blocks;
+    cursor.r = restored.cursor.r;
+    cursor.c = restored.cursor.c;
+    cursor.slot = restored.cursor.slot;
+    if (restored.activeBlockId) {
+      const found = page.blocks.find((b) => b.id === restored.activeBlockId);
+      activeWorkBlock = found || null;
+    } else {
+      activeWorkBlock = null;
+    }
+    await savePage(page);
+    await renderBlocks();
+    refreshUndoButton();
+  }
+
+  if (undoBtn) {
+    undoBtn.addEventListener('click', () => undo());
+    refreshUndoButton();
   }
 
   // ---------- debounced save ----------

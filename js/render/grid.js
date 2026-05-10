@@ -256,12 +256,15 @@ function buildCompositeDOM(cell, activeSlot) {
   return root;
 }
 
-// Long-press a cell that's part of a calculation → popup menu with
-// "← שמאלה" / "ימינה →" buttons. Each tap shifts the contiguous run of
-// non-empty cells (the "part") that the press landed on by one column in
-// that direction. The menu stays open so the kid can step the calculation
-// across multiple columns without re-pressing; it dismisses on a tap
-// outside the menu.
+// Long-press a cell that's part of a calculation → enter selection mode.
+// Initial selection is just the long-pressed cell; the kid can drag along
+// the row (while still pressing) to extend the selection cell-by-cell. On
+// release a popup appears with four buttons:
+//   ← הרחב  ← זוז   זוז →   הרחב →
+// "הרחב" extends the selection by one column on that side, "זוז" shifts the
+// whole selection by one column. The selection stays highlighted while the
+// menu is open so the kid sees what they're moving. The menu dismisses on
+// a tap outside it.
 function attachPartDrag(gridEl, block, onMovePart, onDragStarted) {
   const LONG_PRESS_MS = 350;
   // Slightly larger tolerance than the block-drag handle: a long-press
@@ -278,14 +281,16 @@ function attachPartDrag(gridEl, block, onMovePart, onDragStarted) {
     const c = Number(cellEl.dataset.c);
     if (Number.isNaN(r) || Number.isNaN(c)) return;
 
-    const part = findPartAt(block, r, c);
-    if (!part) return;
+    // Only start a long-press on a cell that holds something — empty cells
+    // can't be moved, and starting a selection there would be confusing.
+    if (!block.cells[`${r},${c}`] && !findOccupyingAnchor(block, r, c)) return;
 
     if (pressState && pressState.timer) clearTimeout(pressState.timer);
     const pointerId = event.pointerId;
     pressState = {
       pointerId,
-      part,
+      startR: r,
+      startC: c,
       startX: event.clientX,
       startY: event.clientY,
       timer: setTimeout(() => fireLongPress(pointerId), LONG_PRESS_MS)
@@ -307,16 +312,73 @@ function attachPartDrag(gridEl, block, onMovePart, onDragStarted) {
   gridEl.addEventListener('pointerup', clearPress);
   gridEl.addEventListener('pointercancel', clearPress);
 
+  // After the kid moves the part, the workblock re-renders and our captured
+  // `gridEl` is detached. Look up the live grid by the block id (the
+  // workblock wrapper carries it as data-block-id) so subsequent paints and
+  // refusal flashes land on the in-DOM cells.
+  function liveGrid() {
+    const w = document.querySelector(`.workblock[data-block-id="${block.id}"]`);
+    return (w && w.querySelector('.grid')) || gridEl;
+  }
+
+  function paintSelection(sel) {
+    const g = liveGrid();
+    g.querySelectorAll('.cell--part-selecting').forEach((el) =>
+      el.classList.remove('cell--part-selecting')
+    );
+    if (!sel) return;
+    for (let cc = sel.startCol; cc <= sel.endCol; cc += 1) {
+      const el = g.querySelector(`.cell[data-r="${sel.row}"][data-c="${cc}"]`);
+      if (el) el.classList.add('cell--part-selecting');
+    }
+  }
+
   function fireLongPress(pointerId) {
     if (!pressState || pressState.pointerId !== pointerId) return;
-    const part = pressState.part;
+    const startR = pressState.startR;
+    const startC = pressState.startC;
     const startX = pressState.startX;
     const startY = pressState.startY;
     pressState = null;
     // Tell the grid to swallow the click that pointerup will synthesise so
     // the long-press doesn't double as a cursor-positioning tap.
     onDragStarted();
-    showMoveMenu(part, startX, startY);
+
+    const sel = { row: startR, anchorCol: startC, startCol: startC, endCol: startC };
+    paintSelection(sel);
+
+    const onMove = (e) => {
+      if (e.pointerId !== pointerId) return;
+      // elementFromPoint also works during pointer capture and across cells
+      // — we don't get pointerover events on individual cells once the
+      // browser implicit-captures the pointer to the original target.
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      const cellEl = target && target.closest && target.closest('.cell');
+      if (!cellEl) return;
+      if (cellEl.closest('.grid') !== gridEl) return;
+      const r = Number(cellEl.dataset.r);
+      const c = Number(cellEl.dataset.c);
+      if (r !== sel.row || Number.isNaN(c)) return;
+      sel.startCol = Math.min(sel.anchorCol, c);
+      sel.endCol = Math.max(sel.anchorCol, c);
+      paintSelection(sel);
+    };
+
+    const onUp = (e) => {
+      if (e.pointerId !== pointerId) return;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      showMoveMenu(
+        { row: sel.row, startCol: sel.startCol, endCol: sel.endCol },
+        e.clientX || startX,
+        e.clientY || startY
+      );
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   }
 
   function showMoveMenu(part, x, y) {
@@ -326,45 +388,81 @@ function attachPartDrag(gridEl, block, onMovePart, onDragStarted) {
     const menu = document.createElement('div');
     menu.className = 'part-move-menu';
     menu.setAttribute('role', 'menu');
+    // Force LTR ordering so left-arrow buttons sit on the left of the menu
+    // even though the surrounding page is RTL.
+    menu.dir = 'ltr';
 
-    // The part's columns shift as the kid taps move buttons; re-render
+    // The selection's columns shift as the kid taps move buttons; re-render
     // tears down `gridEl`'s DOM but the captured `block` reference is the
     // same object across renders, so canMovePart stays correct as long as
     // we keep livePart's coordinates in sync with each successful move.
     const livePart = { ...part };
+    paintSelection(livePart);
+
+    const flashRefuse = () => {
+      const g = liveGrid();
+      for (let c = livePart.startCol; c <= livePart.endCol; c += 1) {
+        const el = g.querySelector(`.cell[data-r="${livePart.row}"][data-c="${c}"]`);
+        if (!el) continue;
+        el.classList.add('cell--refuse');
+        setTimeout(() => el.classList.remove('cell--refuse'), 260);
+      }
+    };
 
     const tryMove = (dcol) => {
       if (canMovePart(block, livePart, 0, dcol)) {
         onMovePart(livePart, 0, dcol);
         livePart.startCol += dcol;
         livePart.endCol += dcol;
+        // Re-paint after the re-render settles. The await chain lives in
+        // onMovePart; querying right away usually finds the new grid since
+        // movePartAndSave's mutations are synchronous before the await.
+        Promise.resolve().then(() => paintSelection(livePart));
       } else {
-        flashPartRefuse(gridEl, livePart);
+        flashRefuse();
       }
     };
 
-    const makeBtn = (label, dcol) => {
+    const tryExtend = (dir) => {
+      if (dir < 0 && livePart.startCol > 0) {
+        livePart.startCol -= 1;
+      } else if (dir > 0 && livePart.endCol + 1 < block.cols) {
+        livePart.endCol += 1;
+      } else {
+        flashRefuse();
+        return;
+      }
+      paintSelection(livePart);
+    };
+
+    const makeBtn = (label, kind, dir) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'part-move-menu__btn';
+      btn.className = `part-move-menu__btn part-move-menu__btn--${kind}`;
       btn.textContent = label;
       btn.addEventListener('mousedown', (e) => e.preventDefault());
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        tryMove(dcol);
+        if (kind === 'extend') tryExtend(dir);
+        else tryMove(dir);
       });
       return btn;
     };
 
-    // "ימינה" advances the column index (math is LTR, so +1 is rightward).
-    menu.append(makeBtn('← שמאלה', -1), makeBtn('ימינה →', +1));
+    // LTR layout: left-arrow buttons on the LEFT, right-arrow on the RIGHT.
+    menu.append(
+      makeBtn('← הרחב', 'extend', -1),
+      makeBtn('← זוז', 'move', -1),
+      makeBtn('זוז →', 'move', +1),
+      makeBtn('הרחב →', 'extend', +1)
+    );
     document.body.appendChild(menu);
 
     // Position above the press point. Fall back to below if the menu would
     // clip the top of the viewport, and clamp horizontally so the buttons
     // are always reachable on narrow screens.
     const rect = menu.getBoundingClientRect();
-    const w = rect.width || 200;
+    const w = rect.width || 280;
     const h = rect.height || 44;
     let left = x - w / 2;
     let top = y - h - 14;
@@ -377,6 +475,7 @@ function attachPartDrag(gridEl, block, onMovePart, onDragStarted) {
     const dismiss = (e) => {
       if (menu.contains(e.target)) return;
       menu.remove();
+      paintSelection(null);
       document.removeEventListener('pointerdown', dismiss, true);
     };
     // Defer one tick so the long-press's own pointerup doesn't dismiss us.
