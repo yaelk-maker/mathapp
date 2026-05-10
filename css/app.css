@@ -332,6 +332,31 @@ h1 {
 }
 .editor__chrome-close:active { background: rgba(0, 0, 0, 0.06); }
 
+/* Pin button (📌): when active, the chrome stays open and the auto-hide
+   timer is suppressed. Sits next to the close (×) button on the topbar. */
+.editor__chrome-pin {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.editor__chrome-pin:active { background: rgba(0, 0, 0, 0.06); }
+.editor__chrome-pin.btn--active {
+  background: rgba(11, 108, 242, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .editor__actions {
   display: flex;
   gap: 8px;
@@ -736,10 +761,21 @@ h1 {
   100% { background: transparent; }
 }
 
-/* Part-move popup: long-pressing a non-empty cell pops a small menu over
-   the press point with "← שמאלה" / "ימינה →" buttons. Each tap shifts the
-   contiguous calculation that contains the pressed cell by one column. The
-   menu stays open until the kid taps outside it. */
+/* Selected cells while the long-press popup is open. Drag along the row
+   during the long-press to extend the selection, then use the move/extend
+   buttons in the popup to act on just those cells. */
+.cell--part-selecting {
+  background: rgba(11, 108, 242, 0.18);
+  outline: 1.5px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 2;
+}
+
+/* Part-move popup: long-pressing a non-empty cell opens a small menu over
+   the press point. The "← זוז" / "זוז →" buttons shift the current
+   selection by one column; the "← הרחב" / "הרחב →" buttons grow the
+   selection by one cell on that side. The menu stays open until the kid
+   taps outside it. */
 .part-move-menu {
   position: fixed;
   z-index: 1000;
@@ -766,6 +802,16 @@ h1 {
 }
 .part-move-menu__btn:active {
   background: var(--accent);
+  color: white;
+}
+/* Make the "extend" buttons visually distinct from the "move" buttons so
+   the kid doesn't grow the selection when they meant to move it. */
+.part-move-menu__btn--extend {
+  color: var(--muted, #666);
+  background: rgba(0, 0, 0, 0.03);
+}
+.part-move-menu__btn--extend:active {
+  background: var(--muted, #666);
   color: white;
 }
 
