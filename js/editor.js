@@ -429,11 +429,15 @@ export async function mountEditor(root, notebookId) {
   async function renderBlocks() {
     pageHost.innerHTML = '';
     activeGrid = null;
-    activeWorkBlock = null;
-    // Only allow deleting a work block if there's at least one other to fall
-    // back to — protects the kid from ending up with no grid at all.
-    const workBlockCount = page.blocks.filter((b) => b.type === BLOCK.WORK).length;
-    const canDeleteWork = workBlockCount > 1;
+    // Preserve the user's active work block across re-renders if it still
+    // exists in the page; fall back to the first work block. Without this,
+    // every re-render reset the active block to the first one, leaving stale
+    // cursor highlights on whichever block the kid had been editing.
+    const workBlocks = page.blocks.filter((b) => b.type === BLOCK.WORK);
+    if (!workBlocks.includes(activeWorkBlock)) {
+      activeWorkBlock = workBlocks[0] || null;
+    }
+    const canDeleteWork = workBlocks.length > 1;
     for (const block of page.blocks) {
       let el = null;
       if (block.type === BLOCK.WORKSHEET) {
@@ -441,12 +445,17 @@ export async function mountEditor(root, notebookId) {
           onDelete: (id) => removeBlock(id)
         });
       } else if (block.type === BLOCK.WORK) {
+        // Only the active work block carries a cursor — without this every
+        // grid painted a cell--cursor at (cursor.r, cursor.c), so the kid
+        // saw the blue highlight echoing across every work block on the page.
+        const isActive = block === activeWorkBlock;
         const { wrapper, grid } = renderWorkBlock(block, {
-          cursor,
+          cursor: isActive ? cursor : null,
           onCellTap: (r, c) => {
             // Tapping a cell switches focus to that work block (if there
             // are several) and back to the math keypad.
             if (activeWorkBlock !== block) {
+              clearActiveCursorHighlight();
               activeWorkBlock = block;
               activeGrid = grid;
               cursor.r = 0; cursor.c = 0; cursor.slot = null;
@@ -458,8 +467,7 @@ export async function mountEditor(root, notebookId) {
           onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
         });
         el = wrapper;
-        if (!activeWorkBlock) {
-          activeWorkBlock = block;
+        if (isActive) {
           activeGrid = grid;
         }
       }
@@ -1239,15 +1247,24 @@ export async function mountEditor(root, notebookId) {
       }
     }
 
-    // Refuse if the current cell is already filled (cursor parked there because
-    // the previous press could not advance past the right edge). Without this
-    // guard subsequent presses would silently overwrite the parked cell — the
-    // kid sees the last char they typed get clobbered with no feedback.
-    const occupiedHere = !!activeWorkBlock.cells[`${r},${c}`];
-    const atRightEdge = c + 1 >= activeWorkBlock.cols;
-    if (occupiedHere && atRightEdge) {
-      flashRefuse(r, c, { reason: 'edge' });
-      notifyAtomEdge();
+    // If the cursor is parked on a non-empty atom, INSERT before it: shift
+    // the contiguous run of cells starting at (r, c) one column to the right
+    // and place the new char at (r, c). This is what lets the kid go back
+    // and fix a calculation by typing the missing prefix — e.g. correcting
+    // "x=18" into "2x=18" by tapping the 'x' and pressing '2', without
+    // having to delete and re-enter the rest of the line.
+    if (activeWorkBlock.cells[`${r},${c}`]) {
+      if (!shiftRowRightFrom(r, c)) {
+        flashRefuse(r, c, { reason: 'edge' });
+        notifyAtomEdge();
+        return;
+      }
+      activeWorkBlock.cells[`${r},${c}`] = { ch };
+      // Multiple cells moved; updateCell only repaints one, so re-render
+      // the whole grid in place. The active grid is preserved.
+      rerenderActiveGrid();
+      moveCursor(r, c + 1);
+      queueSave();
       return;
     }
 
@@ -1262,6 +1279,37 @@ export async function mountEditor(root, notebookId) {
       notifyAtomEdge();
     }
     queueSave();
+  }
+
+  // Shift the contiguous run of non-empty cells in row `r` starting at column
+  // `c` one column to the right. Returns false (and leaves the model
+  // untouched) when the run already reaches the grid edge — caller flashes a
+  // refusal so the kid sees the press didn't take.
+  function shiftRowRightFrom(r, c) {
+    const anchors = [];
+    let k = c;
+    while (k < activeWorkBlock.cols) {
+      const here = activeWorkBlock.cells[`${r},${k}`];
+      if (!here) break;
+      const w = compositeWidth(here);
+      anchors.push({ k, w });
+      k += w;
+    }
+    if (anchors.length === 0) return true;
+    const last = anchors[anchors.length - 1];
+    // After shifting, the rightmost anchor lands at last.k + 1 and covers
+    // last.k + 1 .. last.k + last.w. Refuse if that overflows the grid.
+    if (last.k + last.w >= activeWorkBlock.cols) return false;
+    // Walk in reverse so the destination of one anchor isn't the source
+    // of the next (otherwise the rightmost cell would clobber its neighbor
+    // before the neighbor has been moved).
+    for (let i = anchors.length - 1; i >= 0; i -= 1) {
+      const { k: kk } = anchors[i];
+      const cellVal = activeWorkBlock.cells[`${r},${kk}`];
+      delete activeWorkBlock.cells[`${r},${kk}`];
+      activeWorkBlock.cells[`${r},${kk + 1}`] = cellVal;
+    }
+    return true;
   }
 
   // Append a char into a composite slot, expanding the cell's width if the
@@ -1716,6 +1764,16 @@ export async function mountEditor(root, notebookId) {
   function repaintCell(r, c) {
     const isCursorHere = cursor.r === r && cursor.c === c;
     updateCell(activeGrid, activeWorkBlock, r, c, isCursorHere ? cursor.slot : null);
+  }
+
+  // Strip the cell--cursor class (and any active-slot composite highlight)
+  // from the currently active grid. Used when switching focus to a different
+  // work block, so the previously active block doesn't keep showing a stale
+  // blue highlight.
+  function clearActiveCursorHighlight() {
+    if (!activeGrid || !activeWorkBlock) return;
+    const getCellAt = (rr, cc) => activeWorkBlock.cells[`${rr},${cc}`];
+    updateCursor(activeGrid, cursor, null, getCellAt);
   }
 
   // ---------- debounced save ----------

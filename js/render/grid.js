@@ -68,14 +68,26 @@ export function renderWorkBlock(block, options = {}) {
     }
   }
 
-  // Render a faint vertical guide spanning all rows for each column where a
-  // comparison symbol lives. Visual-only; click events fall through to the
-  // cells beneath via pointer-events: none.
+  // Render a faint vertical guide for each column where a comparison symbol
+  // lives. Visual-only; click events fall through to the cells beneath via
+  // pointer-events: none. The guide spans only as far down as the deepest
+  // row with content (plus one row of headroom for the next step) — without
+  // the trim, the dashed line ran through every empty row at the bottom of
+  // the block and made the work area look full of grid lines.
+  let maxContentRow = -1;
+  for (const key of Object.keys(block.cells)) {
+    const r = Number(key.split(',')[0]);
+    if (r > maxContentRow) maxContentRow = r;
+  }
+  const guideRowSpan = Math.min(
+    block.rows,
+    maxContentRow >= 0 ? maxContentRow + 2 : 1
+  );
   for (const col of alignCols) {
     const guide = document.createElement('div');
     guide.className = 'grid__align-guide';
     guide.style.gridRowStart = 1;
-    guide.style.gridRowEnd = `span ${block.rows}`;
+    guide.style.gridRowEnd = `span ${guideRowSpan}`;
     guide.style.gridColumnStart = col + 1;
     guide.style.gridColumnEnd = 'span 1';
     grid.appendChild(guide);
