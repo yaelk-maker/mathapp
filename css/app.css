@@ -359,26 +359,36 @@ h1 {
 
 .editor__actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 8px;
-  flex-wrap: wrap;
+  /* Force a single line — buttons never wrap. On very narrow viewports the
+     row scrolls horizontally instead of breaking onto a second line. */
+  flex-wrap: nowrap;
   align-items: center;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  /* Hide the horizontal scrollbar on iOS Safari unless actively scrolled —
+     keeps the toolbar clean. */
+  -webkit-overflow-scrolling: touch;
 }
-.editor__actions .btn { font-size: 14px; padding: 8px 14px; }
+.editor__actions .btn { font-size: 14px; padding: 8px 12px; flex: 0 0 auto; }
 .editor__sep {
   width: 1px;
   height: 28px;
   background: var(--border);
-  margin: 0 4px;
+  margin: 0 2px;
   display: inline-block;
+  flex: 0 0 auto;
 }
 
-/* On narrow iPad widths (portrait, Split View, mini) the seven-button toolbar
-   wraps to 2-3 rows, eating page height. Collapse to icon-only by hiding the
-   .label spans inside .btn — emoji stays for recognition. */
-@media (max-width: 900px) {
+/* Below the breakpoint where labels + icons would overflow the visible width,
+   collapse to icon-only. Emoji icons stay so the kid still has visual
+   anchors, and aria-label / title attributes preserve the text hint. The
+   threshold is tuned for iPad 11" landscape (~1194px) — anything narrower
+   wouldn't fit all eleven labeled buttons on one line. */
+@media (max-width: 1200px) {
   .editor__actions .btn .label { display: none; }
-  .editor__actions .btn { font-size: 18px; padding: 8px 12px; }
+  .editor__actions .btn { font-size: 18px; padding: 8px 10px; }
 }
 .btn--active {
   background: var(--accent);
