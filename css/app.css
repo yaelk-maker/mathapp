@@ -698,6 +698,11 @@ h1 {
   width: 0;
   z-index: 0;
 }
+/* Toggle: when the kid turns alignment guides off in the toolbar, hide the
+   dashed verticals across every work block. */
+.editor--no-align-guides .grid__align-guide {
+  display: none;
+}
 
 /* Heavier line every 5 columns/rows for readability (like graph paper) */
 .cell[data-c="4"], .cell[data-c="9"], .cell[data-c="14"], .cell[data-c="19"] {
@@ -731,22 +736,37 @@ h1 {
   100% { background: transparent; }
 }
 
-/* Part drag (long-press to grab a contiguous run of cells — one fraction,
-   one polynomial term — and drop it anywhere in the work block, including
-   sideways). Source cells glow blue while dragging; if the prospective
-   drop would collide with other content, they go red so the kid knows the
-   release won't take. The transform on the cell follows the pointer. */
-.cell--part-dragging {
-  background: rgba(11, 108, 242, 0.18);
-  outline: 1.5px solid var(--accent);
-  outline-offset: -2px;
-  z-index: 3;
-  cursor: grabbing;
-  transition: transform 0.04s linear;
+/* Part-move popup: long-pressing a non-empty cell pops a small menu over
+   the press point with "← שמאלה" / "ימינה →" buttons. Each tap shifts the
+   contiguous calculation that contains the pressed cell by one column. The
+   menu stays open until the kid taps outside it. */
+.part-move-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: white;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
-.cell--part-dragging-invalid {
-  background: rgba(192, 57, 43, 0.20);
-  outline-color: var(--danger);
+.part-move-menu__btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.part-move-menu__btn:active {
+  background: var(--accent);
+  color: white;
 }
 
 /* --- Composite cells (Phase 5) --- */

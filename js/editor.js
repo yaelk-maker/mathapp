@@ -151,6 +151,12 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
           <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
           <span class="editor__sep"></span>
+          <button class="btn btn--ghost" id="row-insert" aria-label="הוספת שורה">➕↕ <span class="label">שורה</span></button>
+          <button class="btn btn--ghost" id="row-delete" aria-label="מחיקת שורה">➖↕ <span class="label">שורה</span></button>
+          <button class="btn btn--ghost" id="col-insert" aria-label="הוספת עמודה">➕↔ <span class="label">עמודה</span></button>
+          <button class="btn btn--ghost" id="col-delete" aria-label="מחיקת עמודה">➖↔ <span class="label">עמודה</span></button>
+          <button class="btn btn--ghost" id="toggle-align-guides" aria-label="קווי יישור">📏 <span class="label">קווי יישור</span></button>
+          <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="toggle-pen" aria-label="ציור">✏️ <span class="label">ציור</span></button>
           <span class="pen-tools" id="pen-tools" hidden>
             ${PEN_COLORS.map(
@@ -230,6 +236,36 @@ export async function mountEditor(root, notebookId) {
     // Layout changed — re-measure the canvas so strokes still render.
     requestAnimationFrame(() => resizeAndReplay());
   });
+
+  // Alignment-guide toggle: hides the dashed vertical lines through `=`/`<`/
+  // `>` columns. Defaults to ON (the original behaviour) but the kid can turn
+  // it off when the guides feel like clutter. Persisted in localStorage.
+  const alignGuidesBtn = document.getElementById('toggle-align-guides');
+  let alignGuidesOn = localStorage.getItem('mathapp.alignGuides') !== '0';
+  editorEl.classList.toggle('editor--no-align-guides', !alignGuidesOn);
+  alignGuidesBtn.classList.toggle('btn--active', alignGuidesOn);
+  alignGuidesBtn.addEventListener('click', () => {
+    alignGuidesOn = !alignGuidesOn;
+    localStorage.setItem('mathapp.alignGuides', alignGuidesOn ? '1' : '0');
+    editorEl.classList.toggle('editor--no-align-guides', !alignGuidesOn);
+    alignGuidesBtn.classList.toggle('btn--active', alignGuidesOn);
+  });
+
+  // Insert / delete row / column at the cursor's current position. Each acts
+  // on the active work block and refuses (with a brief toast) when the
+  // resulting size would be outside the resize-handle bounds (2..40).
+  document.getElementById('row-insert').addEventListener('click', () =>
+    insertRowAtCursor()
+  );
+  document.getElementById('row-delete').addEventListener('click', () =>
+    deleteRowAtCursor()
+  );
+  document.getElementById('col-insert').addEventListener('click', () =>
+    insertColAtCursor()
+  );
+  document.getElementById('col-delete').addEventListener('click', () =>
+    deleteColAtCursor()
+  );
 
   // Print: snapshot the canvas as an <img> in place so drawings make it
   // into the PDF (browsers don't reliably print absolute-positioned canvas).
@@ -860,6 +896,98 @@ export async function mountEditor(root, notebookId) {
 
   async function addWorkBlock() {
     page.blocks.push(newWorkBlock());
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Insert a blank row above the cursor's current row in the active work
+  // block. All cells at row >= cursor.r shift down by one and the row count
+  // grows by one. Refuses if the grid is already at the resize-handle max
+  // (40 rows).
+  async function insertRowAtCursor() {
+    if (!activeWorkBlock) return;
+    if (activeWorkBlock.rows >= 40) {
+      toast('הגעת למספר השורות המרבי.', { kind: 'warn', duration: 2400 });
+      return;
+    }
+    const r = cursor.r;
+    const newCells = {};
+    for (const [key, cell] of Object.entries(activeWorkBlock.cells)) {
+      const [rr, cc] = key.split(',').map(Number);
+      newCells[`${rr >= r ? rr + 1 : rr},${cc}`] = cell;
+    }
+    activeWorkBlock.cells = newCells;
+    activeWorkBlock.rows += 1;
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Delete the cursor's current row in the active work block. Cells in that
+  // row are dropped; rows below shift up. Refuses if it would take the
+  // block below 2 rows (matching the resize handle's lower bound).
+  async function deleteRowAtCursor() {
+    if (!activeWorkBlock) return;
+    if (activeWorkBlock.rows <= 2) {
+      toast('לא ניתן לרדת מתחת לשתי שורות.', { kind: 'warn', duration: 2400 });
+      return;
+    }
+    const r = cursor.r;
+    const newCells = {};
+    for (const [key, cell] of Object.entries(activeWorkBlock.cells)) {
+      const [rr, cc] = key.split(',').map(Number);
+      if (rr === r) continue;
+      newCells[`${rr > r ? rr - 1 : rr},${cc}`] = cell;
+    }
+    activeWorkBlock.cells = newCells;
+    activeWorkBlock.rows -= 1;
+    cursor.r = clamp(cursor.r, 0, activeWorkBlock.rows - 1);
+    cursor.slot = null;
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Insert a blank column to the LEFT of the cursor's current column. Cells
+  // at col >= cursor.c shift right by one. The grid is LTR (math), so "left
+  // of the cursor" is the visually-leading edge.
+  async function insertColAtCursor() {
+    if (!activeWorkBlock) return;
+    if (activeWorkBlock.cols >= 40) {
+      toast('הגעת למספר העמודות המרבי.', { kind: 'warn', duration: 2400 });
+      return;
+    }
+    const c = cursor.c;
+    const newCells = {};
+    for (const [key, cell] of Object.entries(activeWorkBlock.cells)) {
+      const [rr, cc] = key.split(',').map(Number);
+      newCells[`${rr},${cc >= c ? cc + 1 : cc}`] = cell;
+    }
+    activeWorkBlock.cells = newCells;
+    activeWorkBlock.cols += 1;
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Delete the cursor's current column. Cells in that column are dropped;
+  // columns to the right shift left. Composites whose anchor sat in the
+  // deleted column lose their anchor (their data is dropped) — the kid is
+  // expected to delete a column they actually want emptied.
+  async function deleteColAtCursor() {
+    if (!activeWorkBlock) return;
+    if (activeWorkBlock.cols <= 4) {
+      toast('לא ניתן לרדת מתחת לארבע עמודות.', { kind: 'warn', duration: 2400 });
+      return;
+    }
+    const c = cursor.c;
+    const newCells = {};
+    for (const [key, cell] of Object.entries(activeWorkBlock.cells)) {
+      const [rr, cc] = key.split(',').map(Number);
+      if (cc === c) continue;
+      newCells[`${rr},${cc > c ? cc - 1 : cc}`] = cell;
+    }
+    activeWorkBlock.cells = newCells;
+    activeWorkBlock.cols -= 1;
+    cursor.c = clamp(cursor.c, 0, activeWorkBlock.cols - 1);
+    cursor.slot = null;
     await savePage(page);
     await renderBlocks();
   }
