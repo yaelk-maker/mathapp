@@ -256,13 +256,12 @@ function buildCompositeDOM(cell, activeSlot) {
   return root;
 }
 
-// Long-press → drag a SEGMENT of calculation. A "part" is the contiguous
-// run of non-empty cells in one row that the press point lands on — so a
-// stand-alone fraction, a polynomial term separated by spaces, the `=`
-// sign on its own, etc. each become independently draggable. The drag is
-// 2D: cells can move both vertically (rows) and horizontally (columns)
-// in whole-cell increments. On drop, the editor validates the target
-// area is clear and applies the move.
+// Long-press a cell that's part of a calculation → popup menu with
+// "← שמאלה" / "ימינה →" buttons. Each tap shifts the contiguous run of
+// non-empty cells (the "part") that the press landed on by one column in
+// that direction. The menu stays open so the kid can step the calculation
+// across multiple columns without re-pressing; it dismisses on a tap
+// outside the menu.
 function attachPartDrag(gridEl, block, onMovePart, onDragStarted) {
   const LONG_PRESS_MS = 350;
   // Slightly larger tolerance than the block-drag handle: a long-press
@@ -314,62 +313,74 @@ function attachPartDrag(gridEl, block, onMovePart, onDragStarted) {
     const startX = pressState.startX;
     const startY = pressState.startY;
     pressState = null;
+    // Tell the grid to swallow the click that pointerup will synthesise so
+    // the long-press doesn't double as a cursor-positioning tap.
     onDragStarted();
-    startPartDrag(part, pointerId, startX, startY);
+    showMoveMenu(part, startX, startY);
   }
 
-  function startPartDrag(part, pointerId, startX, startY) {
-    // Anchor cell DOM elements live in `block.cells`; covered cells of a
-    // wider composite don't render their own DOM. Translate only the
-    // anchors — the composite's grid-column span moves with its anchor.
-    const sourceEls = [];
-    for (let c = part.startCol; c <= part.endCol; c += 1) {
-      const cellEl = gridEl.querySelector(`.cell[data-r="${part.row}"][data-c="${c}"]`);
-      if (cellEl) sourceEls.push(cellEl);
-    }
-    sourceEls.forEach((el) => el.classList.add('cell--part-dragging'));
+  function showMoveMenu(part, x, y) {
+    // Tear down any leftover menu first — a fresh long-press always wins.
+    document.querySelectorAll('.part-move-menu').forEach((el) => el.remove());
 
-    const cellSize =
-      parseFloat(getComputedStyle(gridEl).getPropertyValue('--cell-size')) || 38;
-    let lastDrow = 0;
-    let lastDcol = 0;
+    const menu = document.createElement('div');
+    menu.className = 'part-move-menu';
+    menu.setAttribute('role', 'menu');
 
-    const onMove = (event) => {
-      if (event.pointerId !== pointerId) return;
-      const dx = event.clientX - startX;
-      const dy = event.clientY - startY;
-      const dcol = Math.round(dx / cellSize);
-      const drow = Math.round(dy / cellSize);
-      if (dcol === lastDcol && drow === lastDrow) return;
-      lastDcol = dcol;
-      lastDrow = drow;
-      const valid = canMovePart(block, part, drow, dcol);
-      sourceEls.forEach((el) => {
-        el.style.transform = `translate(${dcol * cellSize}px, ${drow * cellSize}px)`;
-        el.classList.toggle('cell--part-dragging-invalid', !valid);
-      });
-    };
+    // The part's columns shift as the kid taps move buttons; re-render
+    // tears down `gridEl`'s DOM but the captured `block` reference is the
+    // same object across renders, so canMovePart stays correct as long as
+    // we keep livePart's coordinates in sync with each successful move.
+    const livePart = { ...part };
 
-    const onUp = (event) => {
-      if (event.pointerId !== pointerId) return;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      sourceEls.forEach((el) => {
-        el.classList.remove('cell--part-dragging', 'cell--part-dragging-invalid');
-        el.style.transform = '';
-      });
-      if (lastDrow === 0 && lastDcol === 0) return;
-      if (canMovePart(block, part, lastDrow, lastDcol)) {
-        onMovePart(part, lastDrow, lastDcol);
+    const tryMove = (dcol) => {
+      if (canMovePart(block, livePart, 0, dcol)) {
+        onMovePart(livePart, 0, dcol);
+        livePart.startCol += dcol;
+        livePart.endCol += dcol;
       } else {
-        flashPartRefuse(gridEl, part);
+        flashPartRefuse(gridEl, livePart);
       }
     };
 
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    const makeBtn = (label, dcol) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'part-move-menu__btn';
+      btn.textContent = label;
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        tryMove(dcol);
+      });
+      return btn;
+    };
+
+    // "ימינה" advances the column index (math is LTR, so +1 is rightward).
+    menu.append(makeBtn('← שמאלה', -1), makeBtn('ימינה →', +1));
+    document.body.appendChild(menu);
+
+    // Position above the press point. Fall back to below if the menu would
+    // clip the top of the viewport, and clamp horizontally so the buttons
+    // are always reachable on narrow screens.
+    const rect = menu.getBoundingClientRect();
+    const w = rect.width || 200;
+    const h = rect.height || 44;
+    let left = x - w / 2;
+    let top = y - h - 14;
+    if (left < 8) left = 8;
+    if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+    if (top < 8) top = y + 18;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    const dismiss = (e) => {
+      if (menu.contains(e.target)) return;
+      menu.remove();
+      document.removeEventListener('pointerdown', dismiss, true);
+    };
+    // Defer one tick so the long-press's own pointerup doesn't dismiss us.
+    setTimeout(() => document.addEventListener('pointerdown', dismiss, true), 0);
   }
 }
 
