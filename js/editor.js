@@ -149,8 +149,7 @@ export async function mountEditor(root, notebookId) {
         <div class="editor__actions">
           <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↶ <span class="label">ביטול</span></button>
           <span class="editor__sep"></span>
-          <button class="btn btn--ghost" id="upload-photo" aria-label="צלם דף">📷 <span class="label">צלם דף</span></button>
-          <button class="btn btn--ghost" id="upload-library" aria-label="בחר תמונה">🖼️ <span class="label">בחר תמונה</span></button>
+          <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת תמונה" title="צילום או בחירת תמונה">🖼️ <span class="label">תמונה</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
           <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
@@ -216,9 +215,9 @@ export async function mountEditor(root, notebookId) {
     nb.name = name.trim();
   });
 
-  document.getElementById('upload-photo').addEventListener('click', () =>
-    addWorksheet({ capture: true })
-  );
+  // Single image entry point — capture:false lets the picker offer both
+  // "Take Photo" and "Photo Library" on iPadOS, so the kid doesn't need a
+  // separate camera-only button.
   document.getElementById('upload-library').addEventListener('click', () =>
     addWorksheet({ capture: false })
   );
