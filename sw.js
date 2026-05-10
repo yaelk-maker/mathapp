@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v36';
+const CACHE = 'mathapp-shell-v37';
 const SHELL = [
   './',
   './index.html',
@@ -55,15 +55,47 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Fetch strategy:
+//   - HTML / navigation requests: network-first, fall back to cached
+//     index.html when offline. This way every page load on a live
+//     connection picks up the latest shell — the kid never gets
+//     stuck on an old build because the SW was caching index.html
+//     too aggressively.
+//   - JS / CSS / images: stale-while-revalidate. Serve cached
+//     immediately for speed, then fetch a fresh copy in the
+//     background and update the cache so the next load is current.
+//   - Cross-origin requests: passthrough (browser handles them).
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
+  const isHTML =
+    event.request.mode === 'navigate' ||
+    event.request.destination === 'document' ||
+    url.pathname.endsWith('/') ||
+    url.pathname.endsWith('.html');
+
+  if (isHTML) {
+    event.respondWith(
+      fetch(event.request)
+        .then((res) => {
+          if (res && res.status === 200 && res.type === 'basic') {
+            const clone = res.clone();
+            caches.open(CACHE).then((c) => c.put('./index.html', clone));
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.match(event.request).then((hit) => hit || caches.match('./index.html'))
+        )
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((hit) => {
-      if (hit) return hit;
-      return fetch(event.request)
+      const networked = fetch(event.request)
         .then((res) => {
           if (res && res.status === 200 && res.type === 'basic') {
             const clone = res.clone();
@@ -71,7 +103,8 @@ self.addEventListener('fetch', (event) => {
           }
           return res;
         })
-        .catch(() => caches.match('./index.html'));
+        .catch(() => null);
+      return hit || networked || caches.match('./index.html');
     })
   );
 });
