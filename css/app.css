@@ -646,6 +646,10 @@ h1 {
      grid pushes the body wider than the viewport and the keypad gets
      clipped along with it. */
   max-width: 100%;
+  /* Reserve a strip above the grid for the drag handle so it never overlaps
+     the first row of cells. Without this, the ⋮⋮ chip clipped into the top
+     digits of the leftmost calculation. */
+  padding-top: 22px;
 }
 
 .grid {
@@ -1301,8 +1305,8 @@ h1 {
      right of worksheets/textboxes, so the left side is always free. */
   left: 8px;
   z-index: 4;
-  width: 32px;
-  height: 24px;
+  width: 28px;
+  height: 18px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: white;
@@ -1321,6 +1325,14 @@ h1 {
 }
 .block__handle:hover { color: var(--accent); border-color: var(--accent); }
 .block__handle:active { cursor: grabbing; background: #eaf1ff; }
+
+/* Work blocks reserve a padded strip above the grid (see .workblock
+   padding-top); position the handle inside that strip so it never overlaps
+   the cells. Worksheets keep the default top:-12 since their image starts
+   immediately at y=0 with no padding to host the handle. */
+.workblock > .block__handle {
+  top: 2px;
+}
 
 /* While dragging: lift, dim slightly, and let the block rise above siblings. */
 .block--dragging {
