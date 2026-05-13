@@ -3,7 +3,12 @@ import {
   createNotebook,
   deleteNotebook,
   getNotebook,
-  requestPersistentStorage
+  listTrash,
+  restoreNotebookFromTrash,
+  purgeNotebookFromTrash,
+  purgeExpiredTrash,
+  requestPersistentStorage,
+  TRASH_TTL_MS
 } from './db.js';
 import { mountEditor } from './editor.js';
 import {
@@ -27,6 +32,15 @@ const root = document.getElementById('app');
 async function init() {
   // Ask for persistent storage so iPadOS doesn't evict the kid's homework.
   await requestPersistentStorage();
+
+  // Drop trash entries older than 30 days before the first render so the kid
+  // sees an accurate "נמחקו לאחרונה" count. Best-effort: a failure here
+  // shouldn't block the home screen.
+  try {
+    await purgeExpiredTrash();
+  } catch (err) {
+    console.warn('Trash purge failed:', err);
+  }
 
   if ('serviceWorker' in navigator) {
     try {
@@ -73,19 +87,25 @@ async function render() {
   if (hash.startsWith('#/notebook/')) {
     const id = hash.slice('#/notebook/'.length);
     await renderEditor(id);
+  } else if (hash === '#/trash') {
+    await renderTrash();
   } else {
     await renderHome();
   }
 }
 
 async function renderHome() {
-  const notebooks = await listNotebooks();
+  const [notebooks, trashEntries] = await Promise.all([listNotebooks(), listTrash()]);
+  const trashCount = trashEntries.length;
   root.innerHTML = `
     <div class="screen">
       <h1>MathApp</h1>
       <div class="toolbar">
         <button class="btn" id="new-notebook">+ מחברת חדשה</button>
         <button class="btn btn--ghost" id="restore-all">📥 שחזור</button>
+        <button class="btn btn--ghost" id="open-trash">🗑️ נמחקו לאחרונה${
+          trashCount > 0 ? ` (${trashCount})` : ''
+        }</button>
       </div>
       <input type="search" class="search-input" id="notebook-search"
              placeholder="חיפוש לפי שם או תאריך..." aria-label="חיפוש מחברות"
@@ -113,6 +133,10 @@ async function renderHome() {
       // tells her something actually went wrong.
       toast('יצירת המחברת נכשלה — נסי שוב.', { kind: 'error', duration: 3600 });
     }
+  });
+
+  document.getElementById('open-trash').addEventListener('click', () => {
+    window.location.hash = '#/trash';
   });
 
   document.getElementById('restore-all').addEventListener('click', async () => {
@@ -252,13 +276,14 @@ function wireDeleteLongPress(btn) {
       if (!nb) return;
       const ok = await confirmDialog({
         title: 'מחיקת מחברת',
-        body: `למחוק את "${nb.name}"? פעולה זו לא ניתנת לביטול.`,
+        body: `למחוק את "${nb.name}"? אפשר לשחזר אותה תוך 30 יום מסל "נמחקו לאחרונה".`,
         confirmLabel: 'כן, מחקי',
         cancelLabel: 'ביטול',
         destructive: true
       });
       if (!ok) return;
       await deleteNotebook(id);
+      toast('המחברת הועברה לנמחקו לאחרונה.');
       await render();
     }, DELETE_LONGPRESS_MS);
   };
@@ -279,6 +304,130 @@ function wireDeleteLongPress(btn) {
 
 async function renderEditor(notebookId) {
   await mountEditor(root, notebookId);
+}
+
+async function renderTrash() {
+  const entries = await listTrash();
+  root.innerHTML = `
+    <div class="screen">
+      <div class="toolbar">
+        <button class="btn btn--ghost" id="trash-back">→ חזרה</button>
+      </div>
+      <h1>נמחקו לאחרונה</h1>
+      <p class="trash-hint">מחברות נמחקות לצמיתות אחרי 30 יום.</p>
+      <div id="trash-list-host">${renderTrashList(entries)}</div>
+    </div>
+  `;
+
+  document.getElementById('trash-back').addEventListener('click', () => {
+    window.location.hash = '';
+  });
+
+  wireTrashHandlers(document.getElementById('trash-list-host'));
+}
+
+function renderTrashList(entries) {
+  if (entries.length === 0) {
+    return `<div class="empty-state">סל "נמחקו לאחרונה" ריק.</div>`;
+  }
+  const now = Date.now();
+  return `<div class="notebook-list">
+            ${entries
+              .map((entry) => {
+                const nb = entry.notebook || {};
+                const daysLeft = Math.max(
+                  0,
+                  Math.ceil((entry.deletedAt + TRASH_TTL_MS - now) / (24 * 60 * 60 * 1000))
+                );
+                return `
+              <div class="notebook-card notebook-card--trash" data-id="${entry.id}">
+                <div class="notebook-card__main">
+                  <div class="notebook-card__name">${escapeHtml(nb.name || '')}</div>
+                  <div class="notebook-card__meta">
+                    נמחקה ב-${formatDate(entry.deletedAt)} ·
+                    <span class="trash-days-left">נשארו ${daysLeft} ימים</span>
+                  </div>
+                </div>
+                <button class="notebook-card__action" data-restore="${entry.id}"
+                        aria-label="שחזור" title="שחזור">↩️</button>
+                <button class="notebook-card__delete" data-purge="${entry.id}"
+                        aria-label="מחק לתמיד (לחיצה ארוכה)"
+                        title="לחצי וחזיקי כדי למחוק לתמיד"><span class="longpress-fill"></span>✕</button>
+              </div>
+            `;
+              })
+              .join('')}
+          </div>`;
+}
+
+function wireTrashHandlers(listHost) {
+  for (const btn of listHost.querySelectorAll('[data-restore]')) {
+    btn.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const id = btn.getAttribute('data-restore');
+      try {
+        await restoreNotebookFromTrash(id);
+        toast('המחברת שוחזרה.');
+        await renderTrash();
+      } catch (err) {
+        console.error('Restore from trash failed:', err);
+        toast('שחזור נכשל — נסי שוב.', { kind: 'error', duration: 3600 });
+      }
+    });
+  }
+
+  for (const btn of listHost.querySelectorAll('[data-purge]')) {
+    wirePurgeLongPress(btn);
+  }
+}
+
+// Same long-press pattern as the home-screen delete, but the dialog wording
+// is harsher and the action is genuinely irreversible — purgeNotebookFromTrash
+// drops the snapshot blob bytes and there's no second safety net.
+function wirePurgeLongPress(btn) {
+  let timer = null;
+  let triggered = false;
+
+  const cancel = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    btn.classList.remove('notebook-card__delete--arming');
+  };
+
+  const begin = (event) => {
+    event.stopPropagation();
+    triggered = false;
+    btn.classList.add('notebook-card__delete--arming');
+    timer = setTimeout(async () => {
+      triggered = true;
+      btn.classList.remove('notebook-card__delete--arming');
+      const id = btn.getAttribute('data-purge');
+      const ok = await confirmDialog({
+        title: 'מחיקה לצמיתות',
+        body: 'למחוק את המחברת לתמיד? אי אפשר לשחזר אחרי הפעולה הזו.',
+        confirmLabel: 'כן, מחקי לתמיד',
+        cancelLabel: 'ביטול',
+        destructive: true
+      });
+      if (!ok) return;
+      await purgeNotebookFromTrash(id);
+      await renderTrash();
+    }, DELETE_LONGPRESS_MS);
+  };
+
+  btn.addEventListener('pointerdown', begin);
+  btn.addEventListener('pointerup', (event) => {
+    event.stopPropagation();
+    cancel();
+    if (!triggered) {
+      toast('להחזיק כדי למחוק לתמיד');
+    }
+  });
+  btn.addEventListener('pointerleave', cancel);
+  btn.addEventListener('pointercancel', cancel);
+  btn.addEventListener('click', (event) => event.stopPropagation());
 }
 
 function escapeHtml(s) {

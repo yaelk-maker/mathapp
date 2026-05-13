@@ -1,7 +1,12 @@
 import { openDB, runInTransaction, requestToPromise } from '../vendor/idb.js';
 
 const DB_NAME = 'mathapp';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+
+// Recently-deleted notebooks live in the `trash` store for this long before
+// being permanently dropped on the next app start. 30 days mirrors iOS Photos
+// "Recently Deleted" so it matches the kid's mental model.
+export const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 let _db;
 
@@ -21,6 +26,12 @@ export async function getDB() {
     if (!db.objectStoreNames.contains('strokes')) {
       const s = db.createObjectStore('strokes', { keyPath: 'id' });
       s.createIndex('byPage', 'pageId', { unique: false });
+    }
+    // Trash records are self-contained snapshots — the whole notebook plus
+    // its pages, strokes, and worksheet blob bytes — so restoring is a pure
+    // re-insert and purging is a single delete.
+    if (!db.objectStoreNames.contains('trash')) {
+      db.createObjectStore('trash', { keyPath: 'id' });
     }
   });
   return _db;
@@ -74,33 +85,110 @@ export async function renameNotebook(id, name) {
   return nb;
 }
 
+// Soft delete: move the notebook (with all of its pages, strokes, and
+// worksheet blob bytes) into the `trash` store and remove the live records.
+// The kid can restore it from the "נמחקו לאחרונה" screen for TRASH_TTL_MS,
+// after which purgeExpiredTrash() drops it permanently on app start.
 export async function deleteNotebook(id) {
   const db = await getDB();
   await runInTransaction(
     db,
-    ['notebooks', 'pages', 'blobs', 'strokes'],
+    ['notebooks', 'pages', 'blobs', 'strokes', 'trash'],
     'readwrite',
     async (tx) => {
+      const nb = await requestToPromise(tx.objectStore('notebooks').get(id));
+      if (!nb) return;
       const pages = await requestToPromise(
         tx.objectStore('pages').index('byNotebook').getAll(id)
       );
+
+      const trashedPages = [];
+      const trashedStrokes = [];
+      const trashedBlobs = [];
+      const seenBlobIds = new Set();
+
       for (const page of pages) {
-        // Strokes by page
         const strokes = await requestToPromise(
           tx.objectStore('strokes').index('byPage').getAll(page.id)
         );
-        for (const stroke of strokes) tx.objectStore('strokes').delete(stroke.id);
-        // Worksheet blob references in page blocks
+        for (const stroke of strokes) {
+          trashedStrokes.push(stroke);
+          tx.objectStore('strokes').delete(stroke.id);
+        }
         for (const block of page.blocks || []) {
-          if (block.type === 'worksheet' && block.blobId) {
+          if (block.type === 'worksheet' && block.blobId && !seenBlobIds.has(block.blobId)) {
+            seenBlobIds.add(block.blobId);
+            const record = await requestToPromise(tx.objectStore('blobs').get(block.blobId));
+            if (record) trashedBlobs.push(record);
             tx.objectStore('blobs').delete(block.blobId);
           }
         }
+        trashedPages.push(page);
         tx.objectStore('pages').delete(page.id);
       }
+
+      tx.objectStore('trash').put({
+        id: nb.id,
+        deletedAt: Date.now(),
+        notebook: nb,
+        pages: trashedPages,
+        strokes: trashedStrokes,
+        blobs: trashedBlobs
+      });
       tx.objectStore('notebooks').delete(id);
     }
   );
+}
+
+export async function listTrash() {
+  const db = await getDB();
+  const all = await db.getAll('trash');
+  return all.sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
+// Re-insert a trashed notebook with its original ids. If the same notebook id
+// somehow already exists live (shouldn't happen — delete removed it — but
+// guarding against a corrupted state), the existing record wins and the trash
+// entry is removed so the kid isn't stuck with a ghost in the trash list.
+export async function restoreNotebookFromTrash(id) {
+  const db = await getDB();
+  await runInTransaction(
+    db,
+    ['notebooks', 'pages', 'blobs', 'strokes', 'trash'],
+    'readwrite',
+    async (tx) => {
+      const entry = await requestToPromise(tx.objectStore('trash').get(id));
+      if (!entry) return;
+      const existing = await requestToPromise(tx.objectStore('notebooks').get(id));
+      if (!existing) {
+        tx.objectStore('notebooks').put(entry.notebook);
+        for (const page of entry.pages || []) tx.objectStore('pages').put(page);
+        for (const stroke of entry.strokes || []) tx.objectStore('strokes').put(stroke);
+        for (const blob of entry.blobs || []) tx.objectStore('blobs').put(blob);
+      }
+      tx.objectStore('trash').delete(id);
+    }
+  );
+}
+
+export async function purgeNotebookFromTrash(id) {
+  const db = await getDB();
+  await db.delete('trash', id);
+}
+
+// Drop trash entries older than TRASH_TTL_MS. Called once on app start so the
+// kid doesn't have to think about cleanup. Returns the number purged.
+export async function purgeExpiredTrash(now = Date.now()) {
+  const db = await getDB();
+  const all = await db.getAll('trash');
+  let purged = 0;
+  for (const entry of all) {
+    if (now - entry.deletedAt >= TRASH_TTL_MS) {
+      await db.delete('trash', entry.id);
+      purged += 1;
+    }
+  }
+  return purged;
 }
 
 export async function listPages(notebookId) {

@@ -197,6 +197,27 @@ h1 {
   line-height: 1.6;
 }
 
+/* "נמחקו לאחרונה" screen — visually muted so a trashed notebook reads as
+   inactive, with the day counter on the right (RTL start) of the meta line. */
+.trash-hint {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 16px;
+}
+.notebook-card--trash {
+  background: color-mix(in srgb, var(--card) 92%, var(--muted));
+  opacity: 0.92;
+  cursor: default;
+}
+.notebook-card--trash:active { transform: none; }
+.notebook-card--trash .notebook-card__name {
+  color: var(--muted);
+}
+.trash-days-left {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* Notebook editor (P1 placeholder) */
 .editor {
   padding: 16px;
