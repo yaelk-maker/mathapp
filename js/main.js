@@ -275,11 +275,10 @@ function wireDeleteLongPress(btn) {
       const nb = await getNotebook(id);
       if (!nb) return;
       const ok = await confirmDialog({
-        title: 'מחיקת מחברת',
-        body: `למחוק את "${nb.name}"? אפשר לשחזר אותה תוך 30 יום מסל "נמחקו לאחרונה".`,
-        confirmLabel: 'כן, מחקי',
-        cancelLabel: 'ביטול',
-        destructive: true
+        title: 'העברה לנמחקו לאחרונה',
+        body: `להעביר את "${nb.name}" לסל "נמחקו לאחרונה"? אפשר לשחזר אותה תוך 30 יום.`,
+        confirmLabel: 'העבירי לסל',
+        cancelLabel: 'ביטול'
       });
       if (!ok) return;
       await deleteNotebook(id);
