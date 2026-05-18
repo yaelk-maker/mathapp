@@ -30,7 +30,8 @@ import {
   newSqrtCell,
   newNRootCell,
   newAbsCell,
-  MARGIN_COLS
+  MARGIN_COLS,
+  migrateWorkBlockMargin
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
 import {
@@ -100,6 +101,19 @@ export async function mountEditor(root, notebookId) {
   if (!page.blocks.some((b) => b.type === BLOCK.WORK)) {
     page.blocks.push(newWorkBlock());
     await savePage(page);
+  }
+
+  // One-time per-block migration: shift any cells out of the reserved
+  // notebook margin (cols 0..MARGIN_COLS-1). Notebooks created before the
+  // margin feature stored content at c=0/1; without this, the kid sees
+  // their old work sitting in the read-only margin and can't edit it.
+  {
+    let migrated = false;
+    for (const block of page.blocks) {
+      if (block.type !== BLOCK.WORK) continue;
+      if (migrateWorkBlockMargin(block)) migrated = true;
+    }
+    if (migrated) await savePage(page);
   }
 
   // cursor.slot is null when in main grid; otherwise the active slot name of

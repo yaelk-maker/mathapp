@@ -137,12 +137,12 @@ export function isCompositeEmpty(cell) {
 // spacing — significantly narrower than a full grid cell. Reserving one cell
 // per character made the fraction bar 2-3× wider than the digits, wasting
 // horizontal space. We pack CHARS_PER_FRACTION_CELL chars per cell so the
-// bar hugs the calculation. At 38px cells with a ~14px monospace fraction
-// font (≈9-10px per char including letter-spacing), five chars fit per cell
-// almost exactly — landing the bar right at the text edge while letting
-// longer numerators/denominators (e.g. 12345) live in two cells instead of
-// three, so the kid hits the grid edge less often.
-const CHARS_PER_FRACTION_CELL = 5;
+// bar hugs the calculation. 4 chars/cell is calibrated for the portrait-iPad
+// ~28-30px cells now in use after the bigger-cells change: at 28px cells
+// with ~0.6em font and 0.08em letter-spacing, four chars fit per cell almost
+// exactly. The previous value (5) was tuned for 38px cells and let a 13-char
+// denominator like "(5×x)−2×(5−1)" overflow the spanned cells on portrait.
+const CHARS_PER_FRACTION_CELL = 4;
 export function compositeWidth(cell) {
   if (!isComposite(cell)) return 1;
   if (cell.type === COMPOSITE.FRACTION) {
@@ -185,4 +185,47 @@ export function findOccupyingAnchor(block, r, c) {
     if (cc + w > c) return { r, c: cc };
   }
   return null;
+}
+
+// One-shot migration: shifts every cell of a work block out of the reserved
+// notebook margin (cols 0..MARGIN_COLS-1). Returns true when the block was
+// modified, false when no cells lived in the margin. Used by the editor at
+// page load so notebooks that pre-date the margin feature get their stuck
+// content moved into the writable area rather than left sitting under the
+// red margin line, where it can't be tapped or edited. The block's cols
+// count grows (capped at 40) if shifting would otherwise push content past
+// the existing right edge.
+export function migrateWorkBlockMargin(block) {
+  let needsShift = false;
+  for (const k of Object.keys(block.cells)) {
+    const c = Number(k.split(',')[1]);
+    if (c < MARGIN_COLS) { needsShift = true; break; }
+  }
+  if (!needsShift) return false;
+
+  let maxColAfter = -1;
+  for (const [k, cell] of Object.entries(block.cells)) {
+    const c = Number(k.split(',')[1]);
+    const w = compositeWidth(cell);
+    const after = c + MARGIN_COLS + w - 1;
+    if (after > maxColAfter) maxColAfter = after;
+  }
+  const requiredCols = maxColAfter + 1;
+  if (requiredCols > block.cols) {
+    block.cols = Math.min(40, requiredCols);
+  }
+
+  const newCells = {};
+  for (const [k, cell] of Object.entries(block.cells)) {
+    const [r, c] = k.split(',').map(Number);
+    const newC = c + MARGIN_COLS;
+    // Drop anything that would still land past the (possibly-grown) right
+    // edge — at the 40-col cap this is the only failure mode and it only
+    // affects truly extreme notebooks.
+    if (newC < block.cols) {
+      newCells[`${r},${newC}`] = cell;
+    }
+  }
+  block.cells = newCells;
+  return true;
 }

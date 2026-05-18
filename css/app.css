@@ -965,7 +965,10 @@ h1 {
   display: block;
   /* Pad in slightly from cell edges so the bar doesn't kiss neighbors. */
   width: calc(100% - 4px);
-  height: 1.5px;
+  /* 1.5px disappears into anti-aliasing at portrait-iPad cell sizes — the
+     bar then looks "missing" between the numerator and denominator. 2.5px
+     stays crisp on Retina without crowding the digits. */
+  height: 2.5px;
   background: currentColor;
   margin: 2px auto;
 }
