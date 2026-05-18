@@ -553,7 +553,13 @@ h1 {
   height: 100%;
   align-items: stretch;
 }
-.editor--split #page > .worksheet {
+/* Active worksheet only: the :not(.block--inactive-section) gate is
+   critical — without it, this rule's display: flex would outrank the
+   .editor--split .block--inactive-section { display: none } below
+   (which has lower specificity: 2 classes vs ID + 2 classes + element)
+   and inactive-section worksheets would stay visible despite the kid
+   paging away from them. */
+.editor--split #page > .worksheet:not(.block--inactive-section) {
   display: flex;
   align-items: flex-start;
   justify-content: center;

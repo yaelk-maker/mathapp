@@ -138,6 +138,18 @@ export async function mountEditor(root, notebookId) {
   // the worksheet AND its corresponding workblock as a single "page" —
   // they never end up looking at worksheet 2 next to workblock 1.
   let activeSectionIndex = 0;
+  // Land on the section that contains the kid's actual workblock so old
+  // notebooks (where every worksheet was inserted ahead of the single
+  // shared workblock, leaving section 0 as just an image with no place
+  // to type) don't open on an empty page. The pager still works either
+  // way; this just picks a better default.
+  {
+    const initialSections = computeSections();
+    if (activeWorkBlock) {
+      const idx = initialSections.findIndex((s) => s.includes(activeWorkBlock));
+      if (idx >= 0) activeSectionIndex = idx;
+    }
+  }
 
   // Keypad mode: 'math' (default) or 'hebrew'. Hebrew mode swaps in the
   // letter keypad and routes presses into the active work block's grid
@@ -285,8 +297,12 @@ export async function mountEditor(root, notebookId) {
     localStorage.setItem('mathapp.splitMode', splitMode ? '1' : '0');
     editorEl.classList.toggle('editor--split', splitMode);
     splitToggleBtn.classList.toggle('btn--active', splitMode);
-    // Layout changed — re-measure the canvas so strokes still render.
-    requestAnimationFrame(() => resizeAndReplay());
+    // Re-render so the section's active/inactive classes match the new
+    // mode. Without this, a cross-section cell tap made in non-split
+    // would leave the wrong section marked active when split flips on,
+    // and the kid would see the wrong worksheet+workblock pair. The
+    // renderBlocks tail already schedules the canvas resize+replay.
+    renderBlocks();
   });
 
   // Alignment-guide toggle: hides the dashed vertical lines through `=`/`<`/
@@ -544,37 +560,29 @@ export async function mountEditor(root, notebookId) {
   async function renderBlocks() {
     pageHost.innerHTML = '';
     activeGrid = null;
-    // Preserve the user's active work block across re-renders if it still
-    // exists in the page; fall back to the first work block. Without this,
-    // every re-render reset the active block to the first one, leaving stale
-    // cursor highlights on whichever block the kid had been editing.
     const workBlocks = page.blocks.filter((b) => b.type === BLOCK.WORK);
-    if (!workBlocks.includes(activeWorkBlock)) {
-      activeWorkBlock = workBlocks[0] || null;
-    }
     const canDeleteWork = workBlocks.length > 1;
     // Sections = worksheet-bounded groups of blocks. The pager bar above
-    // the page flips between them in split mode. We re-derive
-    // activeSectionIndex from activeWorkBlock when possible so that
-    // tapping a cell in a different section in non-split mode keeps the
-    // pager in sync, while still respecting an explicit pager click that
-    // changed it.
+    // the page flips between them in split mode. activeSectionIndex is
+    // authoritative — pager clicks set it directly, cell taps sync it
+    // inside onCellTap. We never re-derive it here from activeWorkBlock,
+    // because the user can pager to a worksheet-only section (no wb)
+    // and we want to stay there instead of snapping back to whichever
+    // section happens to contain the last-active workblock.
     const sections = computeSections();
     if (activeSectionIndex >= sections.length) {
       activeSectionIndex = Math.max(0, sections.length - 1);
     }
-    // Follow activeWorkBlock only when it sits in a different section than
-    // the currently-active one — this keeps non-split cell taps in sync
-    // with the pager while preserving explicit pager clicks to
-    // worksheet-only sections (where activeWorkBlock is null or from
-    // elsewhere).
-    if (activeWorkBlock) {
-      const currentSection = sections[activeSectionIndex];
-      const wbInCurrent = currentSection && currentSection.includes(activeWorkBlock);
-      if (!wbInCurrent) {
-        const wbSection = sections.findIndex((s) => s.includes(activeWorkBlock));
-        if (wbSection >= 0) activeSectionIndex = wbSection;
-      }
+    const currentSection = sections[activeSectionIndex] || [];
+    const currentSectionWbs = currentSection.filter((b) => b.type === BLOCK.WORK);
+    // Pin activeWorkBlock to the current section so typing always lands
+    // in something the kid can see. If the section is worksheet-only,
+    // activeWorkBlock = null disables typing — better than letting keys
+    // edit a hidden workblock in another section.
+    if (currentSectionWbs.length === 0) {
+      activeWorkBlock = null;
+    } else if (!currentSectionWbs.includes(activeWorkBlock)) {
+      activeWorkBlock = currentSectionWbs[0];
     }
     const activeBlockIds = new Set(
       (sections[activeSectionIndex] || []).map((b) => b.id)
@@ -608,6 +616,13 @@ export async function mountEditor(root, notebookId) {
               activeWorkBlock = block;
               activeGrid = grid;
               cursor.r = 0; cursor.c = MARGIN_COLS; cursor.slot = null;
+              // Sync the pager so it always shows the section that
+              // contains the kid's focus — without this, tapping a wb
+              // in a different section (only possible in non-split
+              // mode) would leave the pager pointing elsewhere.
+              const newSections = computeSections();
+              const idx = newSections.findIndex((s) => s.includes(block));
+              if (idx >= 0) activeSectionIndex = idx;
             }
             if (keypadMode !== 'math') setKeypadMode('math');
             moveCursor(r, c);
