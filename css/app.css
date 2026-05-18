@@ -573,19 +573,30 @@ h1 {
   overflow-y: auto;
 }
 
-/* In split mode the worksheet sits flush against the page-content's
-   right padding (and on iPad in landscape, the rounded display housing
-   can also clip the corner). Push the delete inset to 16 each side and
-   shrink the button slightly so it sits cleanly inside the image's
-   top-right rather than getting clipped at the edge. The top:28 places
-   it just below the 22px drag-handle padding strip so it sits on the
-   image instead of in the empty padding area. */
-.editor--split .worksheet__delete {
-  top: 28px;
-  right: 16px;
-  width: 36px;
-  height: 36px;
-  font-size: 13px;
+/* Block chrome (close button + drag handle) in split mode lives INSIDE
+   the 22px padding-top strip above each block's content rather than
+   hanging outside via negative top. The outside-positioning pattern
+   doesn't survive split mode: the worksheet has overflow:hidden and the
+   workblock has overflow-y:auto for internal scrolling — either one
+   clips anything with a negative top, so the kid sees half a button or
+   none at all (which is the cropping reported on the worksheet ✕).
+   Inside the padding strip the chrome stays fully visible AND doesn't
+   overlap the image or grid (those start at y=22). */
+.editor--split .worksheet__delete,
+.editor--split .workblock__delete {
+  top: 0;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.editor--split .worksheet > .block__handle {
+  /* Mirror the workblock's `.workblock > .block__handle { top: 2px }` so
+     both blocks have their drag handle inside the padding-top strip in
+     split mode. The default top:-12 was being clipped by the worksheet's
+     overflow:hidden. */
+  top: 2px;
 }
 .editor--split .worksheet__image {
   display: block;
