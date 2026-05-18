@@ -382,15 +382,12 @@ h1 {
   display: flex;
   gap: 6px;
   margin-bottom: 8px;
-  /* Force a single line — buttons never wrap. On very narrow viewports the
-     row scrolls horizontally instead of breaking onto a second line. */
-  flex-wrap: nowrap;
+  /* Wrap to a second line when there isn't enough width for every button.
+     Previously this was nowrap with horizontal scroll, but a kid's-app
+     toolbar that the user can't see all of is a worse trade than letting
+     it grow one row taller. */
+  flex-wrap: wrap;
   align-items: center;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  /* Hide the horizontal scrollbar on iOS Safari unless actively scrolled —
-     keeps the toolbar clean. */
-  -webkit-overflow-scrolling: touch;
 }
 .editor__actions .btn { font-size: 14px; padding: 8px 12px; flex: 0 0 auto; }
 .editor__sep {
@@ -536,18 +533,52 @@ h1 {
      within the workblock instead of overflowing the page. */
   overflow-x: auto;
 }
+
+/* Height-fit in split mode: lock the split row to the available page
+   height and let the worksheet image scale to fit both width AND height
+   of its half. Without max-height the worksheet renders at its natural
+   aspect and either dominates the page (portrait photo in landscape) or
+   wastes vertical space (landscape photo). object-fit: contain keeps the
+   aspect ratio while filling whichever dimension is smaller. The
+   workblock keeps its fixed cell sizes but scrolls internally when it
+   needs more vertical space — that's the only side that can outgrow the
+   viewport, and we want it scrollable rather than crushed. */
+.editor--split .editor__page {
+  overflow: hidden;
+}
+.editor--split .editor__page-content {
+  height: 100%;
+}
+.editor--split #page {
+  height: 100%;
+  align-items: stretch;
+}
+.editor--split #page > .worksheet {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+}
+.editor--split #page > .workblock {
+  overflow-y: auto;
+}
 .editor--split .worksheet__image {
+  display: block;
   max-width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
+  object-fit: contain;
 }
 
-/* Active-worksheet model: in split mode only the marked-active worksheet
-   stays in the flex row — every other worksheet collapses out of layout so
-   two/three uploaded pages don't squeeze the workblock down to 25% width.
-   The kid switches which one is active via the pager pill below. In stacked
-   (non-split) mode every worksheet stays visible — the pager is gated on
-   .editor--split too, so it disappears when there's nothing to page. */
-.editor--split #page > .worksheet:not(.worksheet--active) {
+/* Paired-section model: in split mode, every block that belongs to a
+   section other than the active one collapses out of layout. The active
+   section is exactly one worksheet + the workblocks that follow it (see
+   computeSections in editor.js). The section bar above the page steps
+   through sections, moving the worksheet AND its paired workblock as a
+   single unit. In stacked mode the class has no effect — every block
+   stays visible top-to-bottom as before. */
+.editor--split .block--inactive-section {
   display: none;
 }
 
@@ -639,60 +670,53 @@ h1 {
 }
 .worksheet__delete:active { background: rgba(0, 0, 0, 0.8); }
 
-/* Worksheet pager pill — only visible in split mode, where one worksheet
-   occupies the right column and the kid taps ‹ / › to flip between
-   uploaded pages. The pill anchors to the top-left of the worksheet
-   (opposite the delete button on the right) so it never overlaps either
-   the image edge or the trash control. Hidden in collapsed-thumbnail
-   mode since there's no room and the kid expands first anyway. */
-.worksheet__pager {
+/* Section pager bar — sits above the page area, centered. Only visible
+   in split mode when the page has more than one section (otherwise there's
+   nothing to page between). The bar's CSS is gated on .editor--split so
+   stacked mode never shows it, and on :not(.editor--single-section) so
+   a one-section page (just one worksheet, or no worksheet at all) hides it
+   too. The hidden attribute on the bar element kept it out of layout
+   before the first render — the CSS rule below takes over after that. */
+.editor__section-bar {
   display: none;
-}
-.editor--split .worksheet--active .worksheet__pager {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 3;
-  display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 4px;
-  padding: 3px 6px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  gap: 10px;
+  margin: 6px 0;
+  flex: 0 0 auto;
 }
-.editor--split .worksheet--collapsed .worksheet__pager {
-  display: none;
+.editor--split:not(.editor--single-section) .editor__section-bar {
+  display: flex;
 }
-.worksheet__pager-btn {
+.editor__section-btn {
   appearance: none;
-  background: transparent;
-  border: none;
-  color: white;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-size: 20px;
-  line-height: 1;
+  width: 44px;
+  height: 36px;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--accent);
+  border-radius: 10px;
+  font-size: 22px;
   font-weight: 700;
+  line-height: 1;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
-.worksheet__pager-btn:active {
-  background: rgba(255, 255, 255, 0.2);
+.editor__section-btn:active {
+  background: rgba(11, 108, 242, 0.1);
 }
-.worksheet__pager-count {
-  min-width: 32px;
+.editor__section-count {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  min-width: 56px;
   text-align: center;
-  padding: 0 2px;
 }
 
 .editor__keypad-host {

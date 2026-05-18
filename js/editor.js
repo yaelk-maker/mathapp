@@ -129,14 +129,15 @@ export async function mountEditor(root, notebookId) {
   let activeWorkBlock = page.blocks.find((b) => b.type === BLOCK.WORK);
   let activeGrid = null;
 
-  // Split-view active-worksheet model: when more than one worksheet is
-  // uploaded, the kid would otherwise see them all crammed side-by-side at
-  // 25–33% width each (split's `flex: 1 1 0` distributes width across every
-  // sibling). Instead, we render only the "active" worksheet next to the
-  // work block in split mode and show a small ← N/M → pager so the kid
-  // can flip between them. In normal (stacked) mode this id is irrelevant
-  // — every worksheet renders top-to-bottom as before.
-  let activeWorksheetId = null;
+  // Split-view paired-section model: the page is grouped into "sections"
+  // by worksheet boundaries — every worksheet starts a new section, and
+  // subsequent non-worksheet blocks belong to it until the next worksheet.
+  // In split mode only the active section is rendered (other sections are
+  // hidden via the block--inactive-section class), and a centered pager
+  // above the page flips through sections. This way the kid moves through
+  // the worksheet AND its corresponding workblock as a single "page" —
+  // they never end up looking at worksheet 2 next to workblock 1.
+  let activeSectionIndex = 0;
 
   // Keypad mode: 'math' (default) or 'hebrew'. Hebrew mode swaps in the
   // letter keypad and routes presses into the active work block's grid
@@ -178,7 +179,7 @@ export async function mountEditor(root, notebookId) {
                   aria-label="סגור סרגל כלים" title="סגור סרגל כלים">×</button>
         </div>
         <div class="editor__actions">
-          <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↶ <span class="label">ביטול</span></button>
+          <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↺ <span class="label">ביטול</span></button>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת תמונה" title="צילום או בחירת תמונה">🖼️ <span class="label">תמונה</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
@@ -198,10 +199,17 @@ export async function mountEditor(root, notebookId) {
                 style="background:${c}" data-color="${c}" aria-label="צבע"></button>`
             ).join('')}
             <button class="btn btn--ghost" id="toggle-eraser" aria-label="מחק">🧽 <span class="label">מחק</span></button>
-            <button class="btn btn--ghost" id="undo-stroke" aria-label="בטל">↶ <span class="label">בטל</span></button>
+            <button class="btn btn--ghost" id="undo-stroke" aria-label="בטל">↺ <span class="label">בטל</span></button>
             <button class="btn btn--ghost" id="clear-strokes" aria-label="נקה ציורים">🗑️ <span class="label">נקה ציורים</span></button>
           </span>
         </div>
+      </div>
+      <div class="editor__section-bar" id="section-bar" hidden dir="ltr">
+        <button type="button" class="editor__section-btn" data-dir="prev"
+                aria-label="עמוד קודם" title="עמוד קודם">‹</button>
+        <span class="editor__section-count" id="section-count">1 / 1</span>
+        <button type="button" class="editor__section-btn" data-dir="next"
+                aria-label="עמוד הבא" title="עמוד הבא">›</button>
       </div>
       <div class="editor__page" id="page-scroll">
         <div class="pen-mode-indicator">✏️ מצב ציור פעיל</div>
@@ -253,6 +261,16 @@ export async function mountEditor(root, notebookId) {
     addWorksheet({ capture: false })
   );
   document.getElementById('add-work').addEventListener('click', () => addWorkBlock());
+
+  // Section pager (centered above the page in split mode). Each arrow
+  // moves both the worksheet AND its paired workblock together, so the
+  // kid sees the page-N worksheet next to the page-N work area.
+  document.getElementById('section-bar').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-dir]');
+    if (!btn) return;
+    const delta = btn.dataset.dir === 'prev' ? -1 : 1;
+    setActiveSection(activeSectionIndex + delta);
+  });
 
   // Split-view toggle: in split mode the worksheet sits next to the work
   // block (instead of above). Persisted in localStorage so the preference
@@ -535,28 +553,46 @@ export async function mountEditor(root, notebookId) {
       activeWorkBlock = workBlocks[0] || null;
     }
     const canDeleteWork = workBlocks.length > 1;
-    // Worksheet pager state — see the activeWorksheetId comment near the top
-    // of mountEditor for the rationale. The pager only shows when there's
-    // more than one worksheet on the page; with just one there's nothing to
-    // page between.
-    const worksheetBlocks = page.blocks.filter((b) => b.type === BLOCK.WORKSHEET);
-    if (!worksheetBlocks.some((w) => w.id === activeWorksheetId)) {
-      activeWorksheetId = worksheetBlocks[0] ? worksheetBlocks[0].id : null;
+    // Sections = worksheet-bounded groups of blocks. The pager bar above
+    // the page flips between them in split mode. We re-derive
+    // activeSectionIndex from activeWorkBlock when possible so that
+    // tapping a cell in a different section in non-split mode keeps the
+    // pager in sync, while still respecting an explicit pager click that
+    // changed it.
+    const sections = computeSections();
+    if (activeSectionIndex >= sections.length) {
+      activeSectionIndex = Math.max(0, sections.length - 1);
     }
-    const showWorksheetPager = worksheetBlocks.length > 1;
+    // Follow activeWorkBlock only when it sits in a different section than
+    // the currently-active one — this keeps non-split cell taps in sync
+    // with the pager while preserving explicit pager clicks to
+    // worksheet-only sections (where activeWorkBlock is null or from
+    // elsewhere).
+    if (activeWorkBlock) {
+      const currentSection = sections[activeSectionIndex];
+      const wbInCurrent = currentSection && currentSection.includes(activeWorkBlock);
+      if (!wbInCurrent) {
+        const wbSection = sections.findIndex((s) => s.includes(activeWorkBlock));
+        if (wbSection >= 0) activeSectionIndex = wbSection;
+      }
+    }
+    const activeBlockIds = new Set(
+      (sections[activeSectionIndex] || []).map((b) => b.id)
+    );
+    const showSectionPager = sections.length > 1;
+    editorEl.classList.toggle('editor--single-section', !showSectionPager);
+    const sectionBar = document.getElementById('section-bar');
+    const sectionCount = document.getElementById('section-count');
+    if (sectionBar) sectionBar.hidden = !showSectionPager;
+    if (sectionCount) {
+      sectionCount.textContent = `${activeSectionIndex + 1} / ${Math.max(1, sections.length)}`;
+    }
     for (const block of page.blocks) {
       let el = null;
       if (block.type === BLOCK.WORKSHEET) {
         el = await renderWorksheetBlock(block, {
           onDelete: (id) => removeBlock(id)
         });
-        if (block.id === activeWorksheetId) {
-          el.classList.add('worksheet--active');
-        }
-        if (showWorksheetPager) {
-          const idx = worksheetBlocks.findIndex((w) => w.id === block.id);
-          attachWorksheetPager(el, idx, worksheetBlocks);
-        }
       } else if (block.type === BLOCK.WORK) {
         // Only the active work block carries a cursor — without this every
         // grid painted a cell--cursor at (cursor.r, cursor.c), so the kid
@@ -590,6 +626,12 @@ export async function mountEditor(root, notebookId) {
       if (el) {
         attachBlockChrome(el, block);
         applyBlockOffset(el, block);
+        // Blocks outside the active section are hidden in split mode via
+        // CSS (.editor--split .block--inactive-section). In stacked mode
+        // the class has no effect — every block stays visible top-to-bottom.
+        if (!activeBlockIds.has(block.id)) {
+          el.classList.add('block--inactive-section');
+        }
         pageHost.appendChild(el);
       }
     }
@@ -622,38 +664,48 @@ export async function mountEditor(root, notebookId) {
     }
   }
 
-  // Pager pill on the active worksheet — only attached when there's more
-  // than one worksheet on the page. Styled to appear in split mode (where
-  // it's needed because only one worksheet is visible at a time) and stay
-  // out of the way in stacked mode (where every worksheet is already
-  // visible). The arrows wrap around the list so the kid can flip in
-  // either direction without hitting an "end" state.
-  function attachWorksheetPager(wrapper, idx, worksheetBlocks) {
-    const pager = document.createElement('div');
-    pager.className = 'worksheet__pager';
-    // Force LTR inside the pager so the prev/next arrows visually match
-    // their position-order semantics even on an RTL page.
-    pager.setAttribute('dir', 'ltr');
-    pager.innerHTML = `
-      <button type="button" class="worksheet__pager-btn" data-dir="prev"
-              aria-label="דף קודם" title="דף קודם">‹</button>
-      <span class="worksheet__pager-count">${idx + 1} / ${worksheetBlocks.length}</span>
-      <button type="button" class="worksheet__pager-btn" data-dir="next"
-              aria-label="דף הבא" title="דף הבא">›</button>
-    `;
-    pager.addEventListener('click', (e) => {
-      // Stop the wrapper's tap-to-collapse handler from firing — otherwise
-      // every pager click also toggles the thumbnail-peek state.
-      e.stopPropagation();
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      const delta = btn.dataset.dir === 'prev' ? -1 : 1;
-      const len = worksheetBlocks.length;
-      const nextIdx = (idx + delta + len) % len;
-      activeWorksheetId = worksheetBlocks[nextIdx].id;
-      renderBlocks();
-    });
-    wrapper.appendChild(pager);
+  // Group the page's blocks into sections, where each section starts with
+  // a worksheet and contains every following non-worksheet block up to the
+  // next worksheet. Blocks before the first worksheet (or if there's no
+  // worksheet at all) form a leading "no-worksheet" section so the page
+  // always has at least one renderable section.
+  function computeSections() {
+    const sections = [];
+    let current = null;
+    for (const b of page.blocks) {
+      if (b.type === BLOCK.WORKSHEET) {
+        if (current) sections.push(current);
+        current = [b];
+      } else {
+        if (!current) current = [];
+        current.push(b);
+      }
+    }
+    if (current) sections.push(current);
+    return sections;
+  }
+
+  // Pager click handler: jump to a different section. Wraps around so the
+  // kid can flip in either direction without hitting an "end" state. Also
+  // re-points activeWorkBlock at the first workblock in the new section so
+  // typing immediately lands somewhere sensible.
+  function setActiveSection(idx) {
+    const sections = computeSections();
+    if (sections.length === 0) return;
+    const next = ((idx % sections.length) + sections.length) % sections.length;
+    activeSectionIndex = next;
+    const section = sections[next];
+    const wb = section.find((b) => b.type === BLOCK.WORK);
+    // Re-point at this section's workblock (or null if it's a
+    // worksheet-only section — clearing prevents the renderBlocks
+    // sync from snapping back to the old section's workblock).
+    activeWorkBlock = wb || null;
+    if (wb) {
+      cursor.r = 0;
+      cursor.c = MARGIN_COLS;
+      cursor.slot = null;
+    }
+    renderBlocks();
   }
 
   // Small "{used}/{cols}" chip on the top-end of a work block. Shows how much
@@ -954,13 +1006,38 @@ export async function mountEditor(root, notebookId) {
     const ws = await uploadWorksheet({ capture });
     if (!ws) return;
     pushUndo();
-    const workIndex = page.blocks.findIndex((b) => b.type === BLOCK.WORK);
-    if (workIndex < 0) page.blocks.push(ws);
-    else page.blocks.splice(workIndex, 0, ws);
-    // Surface the newly uploaded worksheet immediately — without this the
-    // kid uploads a second page in split mode and nothing visible changes
-    // (the old active worksheet still occupies the right column).
-    activeWorksheetId = ws.id;
+    const hasExistingWorksheet = page.blocks.some(
+      (b) => b.type === BLOCK.WORKSHEET
+    );
+    if (!hasExistingWorksheet) {
+      // First worksheet on the page — insert it ahead of the implicit
+      // first work block so the kid's existing work area is paired with
+      // the new worksheet image.
+      const workIndex = page.blocks.findIndex((b) => b.type === BLOCK.WORK);
+      if (workIndex < 0) page.blocks.push(ws);
+      else page.blocks.splice(workIndex, 0, ws);
+    } else {
+      // Subsequent uploads each become their own paired section: append
+      // the new worksheet AND a fresh work block right after it. Without
+      // this the kid uploads a second page but has no place to solve it.
+      page.blocks.push(ws);
+      page.blocks.push(newWorkBlock());
+    }
+    // Activate the new section so split view jumps to the new worksheet
+    // immediately and renderBlocks doesn't have to derive it from the
+    // previous activeWorkBlock.
+    const sections = computeSections();
+    activeSectionIndex = sections.findIndex((s) => s.includes(ws));
+    if (activeSectionIndex < 0) activeSectionIndex = 0;
+    const newWb = (sections[activeSectionIndex] || []).find(
+      (b) => b.type === BLOCK.WORK
+    );
+    if (newWb) {
+      activeWorkBlock = newWb;
+      cursor.r = 0;
+      cursor.c = MARGIN_COLS;
+      cursor.slot = null;
+    }
     await savePage(page);
     await renderBlocks();
   }
@@ -1012,19 +1089,24 @@ export async function mountEditor(root, notebookId) {
       }
     }
 
-    // If the kid is deleting the worksheet that's currently active in split
-    // view, fall forward to the next worksheet (or back to the previous one
-    // if they removed the last entry) so the view doesn't snap back to the
-    // beginning of the page. The renderBlocks() fallback would still rescue
-    // us — it picks the first worksheet — but moving by one feels less
-    // disorienting after a delete than jumping to page 1.
-    if (block.type === BLOCK.WORKSHEET && block.id === activeWorksheetId) {
-      const worksheets = page.blocks.filter((b) => b.type === BLOCK.WORKSHEET);
-      const idx = worksheets.findIndex((w) => w.id === block.id);
-      const neighbor = worksheets[idx + 1] || worksheets[idx - 1] || null;
-      activeWorksheetId = neighbor ? neighbor.id : null;
-    }
+    // If the deleted block belongs to the active section, fall forward to
+    // the next section (or back to the previous one if the last section
+    // was removed) so the pager doesn't snap to page 1.
+    const sectionsBefore = computeSections();
+    const oldSectionIdx = sectionsBefore.findIndex((s) =>
+      s.some((b) => b.id === blockId)
+    );
     page.blocks = page.blocks.filter((b) => b.id !== blockId);
+    const sectionsAfter = computeSections();
+    if (oldSectionIdx === activeSectionIndex) {
+      if (activeSectionIndex >= sectionsAfter.length) {
+        activeSectionIndex = Math.max(0, sectionsAfter.length - 1);
+      }
+    } else if (oldSectionIdx >= 0 && oldSectionIdx < activeSectionIndex) {
+      // A section before the active one was removed — shift the index
+      // down so we stay on the same logical page.
+      activeSectionIndex = Math.max(0, activeSectionIndex - 1);
+    }
     if (block.type === BLOCK.WORKSHEET && block.blobId) {
       revokeBlobUrl(block.blobId);
       await deleteBlob(block.blobId);
