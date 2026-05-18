@@ -546,6 +546,16 @@ h1 {
   height: auto;
 }
 
+/* Active-worksheet model: in split mode only the marked-active worksheet
+   stays in the flex row — every other worksheet collapses out of layout so
+   two/three uploaded pages don't squeeze the workblock down to 25% width.
+   The kid switches which one is active via the pager pill below. In stacked
+   (non-split) mode every worksheet stays visible — the pager is gated on
+   .editor--split too, so it disappears when there's nothing to page. */
+.editor--split #page > .worksheet:not(.worksheet--active) {
+  display: none;
+}
+
 /* In split view the work area is the bottleneck — shrink each grid cell
    ~20% so two more equation lines fit before the kid has to scroll. The
    font size is bound to --cell-size so the digits scale with the cell.
@@ -635,6 +645,62 @@ h1 {
   transition: background 0.1s ease;
 }
 .worksheet__delete:active { background: rgba(0, 0, 0, 0.8); }
+
+/* Worksheet pager pill — only visible in split mode, where one worksheet
+   occupies the right column and the kid taps ‹ / › to flip between
+   uploaded pages. The pill anchors to the top-left of the worksheet
+   (opposite the delete button on the right) so it never overlaps either
+   the image edge or the trash control. Hidden in collapsed-thumbnail
+   mode since there's no room and the kid expands first anyway. */
+.worksheet__pager {
+  display: none;
+}
+.editor--split .worksheet--active .worksheet__pager {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.editor--split .worksheet--collapsed .worksheet__pager {
+  display: none;
+}
+.worksheet__pager-btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.worksheet__pager-btn:active {
+  background: rgba(255, 255, 255, 0.2);
+}
+.worksheet__pager-count {
+  min-width: 32px;
+  text-align: center;
+  padding: 0 2px;
+}
 
 .editor__keypad-host {
   flex: 0 0 auto;
