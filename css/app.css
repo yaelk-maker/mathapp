@@ -500,6 +500,11 @@ h1 {
 .editor__page-content {
   position: relative;
   padding: 16px;
+  /* Reserved left gutter — a paper-style margin that no cells, worksheets or
+     work blocks can occupy. Pairs with the +96px term baked into the .grid
+     --cell-size calc so the bigger cells still fit within the remaining
+     horizontal space. */
+  padding-left: 96px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -543,9 +548,11 @@ h1 {
 
 /* In split view the work area is the bottleneck — shrink each grid cell
    ~20% so two more equation lines fit before the kid has to scroll. The
-   font size is bound to --cell-size so the digits scale with the cell. */
+   font size is bound to --cell-size so the digits scale with the cell.
+   The 184px term matches the wider padding chain (96px reserved left
+   gutter + 16px right + 50px page borders + 16px editor + 6px breathing). */
 .editor--split .grid {
-  --cell-size: min(30px, calc((100vw - 104px) / var(--cols) / 2));
+  --cell-size: min(42px, calc((100vw - 184px) / var(--cols) / 2));
 }
 
 /* --- Worksheet thumbnail-peek (split view) ---
@@ -709,13 +716,14 @@ h1 {
 }
 
 .grid {
-  /* Default 38px cell, but shrink to fit when the grid would otherwise
-     exceed the viewport width. The 104px subtracted accounts for the full
-     padding chain around the grid: editor--full padding (8 each side = 16),
-     editor__page padding+border (24+1 each side = 50), editor__page-content
-     padding (16 each side = 32), plus ~6px breathing room. Without this,
-     a 24-col grid (912px at 38px cells) overflows iPad 9.7" portrait. */
-  --cell-size: min(38px, calc((100vw - 104px) / var(--cols)));
+  /* Default 52px cell (bumped from 38px to give kids a bigger digit target),
+     but shrink to fit when the grid would otherwise exceed the viewport
+     width. The 184px subtracted accounts for the full padding chain around
+     the grid: editor--full padding (8 each side = 16), editor__page
+     padding+border (24+1 each side = 50), editor__page-content padding (16
+     right + 96 left = 112), plus ~6px breathing room. The 96px left term
+     is the reserved unusable margin defined on .editor__page-content. */
+  --cell-size: min(52px, calc((100vw - 184px) / var(--cols)));
   display: grid;
   grid-template-columns: repeat(var(--cols), var(--cell-size));
   grid-template-rows: repeat(var(--rows), var(--cell-size));
@@ -723,7 +731,7 @@ h1 {
   border-top: 1px solid #b8b8b8;
   border-left: 1px solid #b8b8b8;
   font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
-  font-size: calc(var(--cell-size) * 0.62);
+  font-size: calc(var(--cell-size) * 0.72);
   line-height: 1;
   user-select: none;
   -webkit-user-select: none;
