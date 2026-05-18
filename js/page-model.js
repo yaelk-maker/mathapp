@@ -20,13 +20,15 @@ export const COMPOSITE = Object.freeze({
   ABS: 'abs'
 });
 
-// 24 cols comfortably fits a distribution line like
-//   6x−3(2x−3)>(x+4)−4(x−1)
-// (22 atoms) without forcing the kid to discover the resize handle mid-thought.
-// 30 rows is enough for several solving steps + a couple of extra equations
-// per page without scrolling to the resize handle every notebook. Empty rows
-// at the bottom can still be trimmed with the resize handle.
-export const DEFAULT_GRID = Object.freeze({ rows: 30, cols: 24 });
+// 19 cols × 25 rows is calibrated for the bigger portrait-iPad cells
+// (after the cell-size cap was raised to 56px). At those defaults a
+// distribution line like 6x−3(2x−3)>(x+4)−4(x−1) still fits within the
+// writable area (24 - 2 margin = 22 → 19 - 2 margin = 17, slightly tighter
+// but acceptable now that digits are larger and easier to read), and the
+// kid sees ~25-30% bigger cells without scrolling. Notebooks created
+// before this change are shrunk on load via migrateWorkBlockSize, gated on
+// "the existing content actually fits" so kids never lose work.
+export const DEFAULT_GRID = Object.freeze({ rows: 25, cols: 19 });
 
 // Reserved "notebook margin" on the left of every work block. The first
 // MARGIN_COLS columns render with the same grid lines as the rest of the
@@ -228,4 +230,30 @@ export function migrateWorkBlockMargin(block) {
   }
   block.cells = newCells;
   return true;
+}
+
+// Shrink a work block toward DEFAULT_GRID dimensions if doing so doesn't
+// truncate existing content. Used at page load so notebooks created with
+// the old 30×24 defaults pick up the new 25×19 sizing (which lets each
+// cell render bigger). If the kid had explicitly resized a block, or has
+// content past the new defaults, the block is left at its current size.
+export function migrateWorkBlockSize(block) {
+  let maxRow = -1;
+  let maxCol = -1;
+  for (const [k, cell] of Object.entries(block.cells)) {
+    const [r, c] = k.split(',').map(Number);
+    if (r > maxRow) maxRow = r;
+    const w = compositeWidth(cell);
+    if (c + w - 1 > maxCol) maxCol = c + w - 1;
+  }
+  let modified = false;
+  if (block.rows > DEFAULT_GRID.rows && maxRow < DEFAULT_GRID.rows) {
+    block.rows = DEFAULT_GRID.rows;
+    modified = true;
+  }
+  if (block.cols > DEFAULT_GRID.cols && maxCol < DEFAULT_GRID.cols) {
+    block.cols = DEFAULT_GRID.cols;
+    modified = true;
+  }
+  return modified;
 }

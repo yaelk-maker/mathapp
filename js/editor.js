@@ -31,7 +31,8 @@ import {
   newNRootCell,
   newAbsCell,
   MARGIN_COLS,
-  migrateWorkBlockMargin
+  migrateWorkBlockMargin,
+  migrateWorkBlockSize
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
 import {
@@ -103,15 +104,19 @@ export async function mountEditor(root, notebookId) {
     await savePage(page);
   }
 
-  // One-time per-block migration: shift any cells out of the reserved
-  // notebook margin (cols 0..MARGIN_COLS-1). Notebooks created before the
-  // margin feature stored content at c=0/1; without this, the kid sees
-  // their old work sitting in the read-only margin and can't edit it.
+  // One-time per-block migrations:
+  //   1. Shift cells out of the reserved notebook margin (cols 0..MARGIN_COLS-1)
+  //      — content from before the margin feature existed.
+  //   2. Shrink rows/cols toward the new (smaller) DEFAULT_GRID so the kid
+  //      gets visibly bigger cells without losing work. Order matters:
+  //      margin migration runs first because it can grow cols, then size
+  //      migration trims them back if the new max fits.
   {
     let migrated = false;
     for (const block of page.blocks) {
       if (block.type !== BLOCK.WORK) continue;
       if (migrateWorkBlockMargin(block)) migrated = true;
+      if (migrateWorkBlockSize(block)) migrated = true;
     }
     if (migrated) await savePage(page);
   }

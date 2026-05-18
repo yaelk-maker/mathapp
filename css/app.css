@@ -555,7 +555,7 @@ h1 {
    ~20% so two more equation lines fit before the kid has to scroll. The
    font size is bound to --cell-size so the digits scale with the cell. */
 .editor--split .grid {
-  --cell-size: min(42px, calc((100vw - 104px) / var(--cols) / 2));
+  --cell-size: min(46px, calc((100vw - 104px) / var(--cols) / 2));
 }
 
 /* --- Worksheet thumbnail-peek (split view) ---
@@ -775,16 +775,16 @@ h1 {
 }
 
 .grid {
-  /* Default 52px cell (bumped from 38px to give kids a bigger digit target),
-     but shrink to fit when the grid would otherwise exceed the viewport
-     width. The 104px subtracted accounts for the full padding chain around
-     the grid: editor--full padding (8 each side = 16), editor__page
+  /* Cap raised to 56px (paired with the smaller 19×25 DEFAULT_GRID) so
+     fewer-but-bigger cells genuinely give the kid larger digits.
+     The 104px subtracted accounts for the full padding chain around the
+     grid: editor--full padding (8 each side = 16), editor__page
      padding+border (24+1 each side = 50), editor__page-content padding
      (16 each side = 32), plus ~6px breathing room. The notebook-style
      left "margin" is drawn INSIDE the grid via .cell--margin on the first
      two columns — putting it outside used to eat into the per-cell width
      on portrait iPad and actually shrunk the cells. */
-  --cell-size: min(52px, calc((100vw - 104px) / var(--cols)));
+  --cell-size: min(56px, calc((100vw - 104px) / var(--cols)));
   display: grid;
   grid-template-columns: repeat(var(--cols), var(--cell-size));
   grid-template-rows: repeat(var(--rows), var(--cell-size));
@@ -792,7 +792,7 @@ h1 {
   border-top: 1px solid #b8b8b8;
   border-left: 1px solid #b8b8b8;
   font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
-  font-size: calc(var(--cell-size) * 0.72);
+  font-size: calc(var(--cell-size) * 0.78);
   line-height: 1;
   user-select: none;
   -webkit-user-select: none;
@@ -946,10 +946,12 @@ h1 {
 }
 
 /* Fractions: numerator stacked over denominator with a horizontal bar.
-   The cell's grid-column-span gives the bar length; digits stay readable. */
+   The cell's grid-column-span gives the bar length; digits stay readable.
+   Font scale dropped to 0.55em (from 0.6em) so num + bar + den fit
+   inside one cell height without crowding the bar out via flex shrink. */
 .composite--fraction {
   flex-direction: column;
-  font-size: 0.6em;
+  font-size: 0.55em;
 }
 .composite__num,
 .composite__den {
@@ -965,12 +967,16 @@ h1 {
   display: block;
   /* Pad in slightly from cell edges so the bar doesn't kiss neighbors. */
   width: calc(100% - 4px);
-  /* 1.5px disappears into anti-aliasing at portrait-iPad cell sizes — the
-     bar then looks "missing" between the numerator and denominator. 2.5px
-     stays crisp on Retina without crowding the digits. */
-  height: 2.5px;
+  /* flex: 0 0 3px pins the bar to a 3px main-axis size in the column-flex
+     composite and disables shrinking. Without this, when num + den content
+     exceeded the cell height, flex-shrink would crush the bar down toward
+     0px on Retina and it looked like the bar was missing entirely. The
+     explicit height matches the flex-basis so non-flex contexts work too. */
+  flex: 0 0 3px;
+  height: 3px;
   background: currentColor;
   margin: 2px auto;
+  border-radius: 1px;
 }
 
 /* For wide (multi-column) fractions, digits sit with light tracking so the
