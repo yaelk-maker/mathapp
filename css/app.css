@@ -558,15 +558,34 @@ h1 {
    .editor--split .block--inactive-section { display: none } below
    (which has lower specificity: 2 classes vs ID + 2 classes + element)
    and inactive-section worksheets would stay visible despite the kid
-   paging away from them. */
+   paging away from them. The padding-top:22px matches the workblock's
+   reserved drag-handle strip so the worksheet image starts at the same
+   y-coordinate as the workblock grid — without this they were
+   misaligned by exactly the 22px workblock padding. */
 .editor--split #page > .worksheet:not(.block--inactive-section) {
   display: flex;
   align-items: flex-start;
   justify-content: center;
   overflow: hidden;
+  padding-top: 22px;
 }
 .editor--split #page > .workblock {
   overflow-y: auto;
+}
+
+/* In split mode the worksheet sits flush against the page-content's
+   right padding (and on iPad in landscape, the rounded display housing
+   can also clip the corner). Push the delete inset to 16 each side and
+   shrink the button slightly so it sits cleanly inside the image's
+   top-right rather than getting clipped at the edge. The top:28 places
+   it just below the 22px drag-handle padding strip so it sits on the
+   image instead of in the empty padding area. */
+.editor--split .worksheet__delete {
+  top: 28px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  font-size: 13px;
 }
 .editor--split .worksheet__image {
   display: block;

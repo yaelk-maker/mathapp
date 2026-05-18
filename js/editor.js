@@ -193,7 +193,7 @@ export async function mountEditor(root, notebookId) {
         <div class="editor__actions">
           <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↺ <span class="label">ביטול</span></button>
           <span class="editor__sep"></span>
-          <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת תמונה" title="צילום או בחירת תמונה">🖼️ <span class="label">תמונה</span></button>
+          <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת תמונה" title="צילום או בחירת תמונה">📷 <span class="label">תמונה</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
           <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
