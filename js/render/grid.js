@@ -10,7 +10,8 @@ import {
   compositeSlots,
   compositeWidth,
   findOccupyingAnchor,
-  occupiedCellSet
+  occupiedCellSet,
+  MARGIN_COLS
 } from '../page-model.js';
 
 export function renderWorkBlock(block, options = {}) {
@@ -44,6 +45,11 @@ export function renderWorkBlock(block, options = {}) {
       cell.className = 'cell';
       cell.dataset.r = r;
       cell.dataset.c = c;
+      // Cells in the reserved left margin paint the same grid lines but are
+      // not interactive — see MARGIN_COLS in page-model.js. The class drives
+      // both the notebook-style background and a bolder right border on the
+      // last margin column.
+      if (c < MARGIN_COLS) cell.classList.add('cell--margin');
 
       const value = getCell(block, r, c);
       const width = compositeWidth(value);
@@ -113,6 +119,9 @@ export function renderWorkBlock(block, options = {}) {
       if (!target) return;
       const r = Number(target.dataset.r);
       const c = Number(target.dataset.c);
+      // Reserved-margin cells silently swallow taps. Without this the
+      // cursor would land in c=0/1 and the kid would lose her place.
+      if (c < MARGIN_COLS) return;
       onCellTap(r, c);
     });
     grid.addEventListener('pointerdown', () => {
@@ -517,7 +526,10 @@ function canMovePart(block, part, drow, dcol) {
   }
   for (const m of moves) {
     if (m.newR < 0 || m.newR >= block.rows) return false;
-    if (m.newC < 0 || m.newC + m.w > block.cols) return false;
+    // The first MARGIN_COLS are the reserved notebook margin — refuse any
+    // move that would land content there, same as crossing the right/top
+    // edge of the grid.
+    if (m.newC < MARGIN_COLS || m.newC + m.w > block.cols) return false;
     for (let i = 0; i < m.w; i += 1) {
       const k = `${m.newR},${m.newC + i}`;
       if (sourceKeys.has(k)) continue;

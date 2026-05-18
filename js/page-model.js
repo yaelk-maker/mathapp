@@ -28,6 +28,16 @@ export const COMPOSITE = Object.freeze({
 // at the bottom can still be trimmed with the resize handle.
 export const DEFAULT_GRID = Object.freeze({ rows: 30, cols: 24 });
 
+// Reserved "notebook margin" on the left of every work block. The first
+// MARGIN_COLS columns render with the same grid lines as the rest of the
+// work area but the kid can't tap them or move the cursor into them — the
+// effect is a paper-style left margin without sacrificing horizontal
+// resolution (the grid is still drawn end-to-end, only the cursor is
+// restricted). Apple-Pencil drawing still works across the margin since
+// the canvas overlay is independent of grid cells. The cursor starts at
+// column MARGIN_COLS in every new work block.
+export const MARGIN_COLS = 2;
+
 let _counter = 0;
 function blockId() {
   _counter += 1;

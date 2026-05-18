@@ -29,7 +29,8 @@ import {
   newPowCell,
   newSqrtCell,
   newNRootCell,
-  newAbsCell
+  newAbsCell,
+  MARGIN_COLS
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
 import {
@@ -103,7 +104,9 @@ export async function mountEditor(root, notebookId) {
 
   // cursor.slot is null when in main grid; otherwise the active slot name of
   // a composite cell at (r, c) — e.g. 'num', 'den', 'base', 'exp', 'radicand'.
-  const cursor = { r: 0, c: 0, slot: null };
+  // c starts at MARGIN_COLS so the cursor never lands inside the reserved
+  // notebook margin on the left of the grid.
+  const cursor = { r: 0, c: MARGIN_COLS, slot: null };
   let activeWorkBlock = page.blocks.find((b) => b.type === BLOCK.WORK);
   let activeGrid = null;
 
@@ -549,7 +552,7 @@ export async function mountEditor(root, notebookId) {
               clearActiveCursorHighlight();
               activeWorkBlock = block;
               activeGrid = grid;
-              cursor.r = 0; cursor.c = 0; cursor.slot = null;
+              cursor.r = 0; cursor.c = MARGIN_COLS; cursor.slot = null;
             }
             if (keypadMode !== 'math') setKeypadMode('math');
             moveCursor(r, c);
@@ -576,7 +579,7 @@ export async function mountEditor(root, notebookId) {
     // block is now active.
     if (activeWorkBlock) {
       cursor.r = clamp(cursor.r, 0, activeWorkBlock.rows - 1);
-      cursor.c = clamp(cursor.c, 0, activeWorkBlock.cols - 1);
+      cursor.c = clamp(cursor.c, MARGIN_COLS, activeWorkBlock.cols - 1);
       const anchor = findOccupyingAnchor(activeWorkBlock, cursor.r, cursor.c);
       if (anchor) { cursor.r = anchor.r; cursor.c = anchor.c; }
       if (cursor.slot && !activeWorkBlock.cells[`${cursor.r},${cursor.c}`]) {
@@ -784,7 +787,7 @@ export async function mountEditor(root, notebookId) {
       block.cells = newCells;
       // Clamp the cursor inside the new bounds.
       cursor.r = clamp(cursor.r, 0, block.rows - 1);
-      cursor.c = clamp(cursor.c, 0, block.cols - 1);
+      cursor.c = clamp(cursor.c, MARGIN_COLS, block.cols - 1);
       if (cursor.slot && !block.cells[`${cursor.r},${cursor.c}`]) {
         cursor.slot = null;
       }
@@ -1108,7 +1111,7 @@ export async function mountEditor(root, notebookId) {
     }
     activeWorkBlock.cells = newCells;
     activeWorkBlock.cols -= 1;
-    cursor.c = clamp(cursor.c, 0, activeWorkBlock.cols - 1);
+    cursor.c = clamp(cursor.c, MARGIN_COLS, activeWorkBlock.cols - 1);
     cursor.slot = null;
     await savePage(page);
     await renderBlocks();
@@ -1955,7 +1958,9 @@ export async function mountEditor(root, notebookId) {
   function moveCursor(r, c, options) {
     if (!activeWorkBlock) return;
     const nr = clamp(r, 0, activeWorkBlock.rows - 1);
-    const nc = clamp(c, 0, activeWorkBlock.cols - 1);
+    // Lower bound is MARGIN_COLS — arrow-left at the start of the writable
+    // area is a no-op rather than letting the cursor slip into the margin.
+    const nc = clamp(c, MARGIN_COLS, activeWorkBlock.cols - 1);
     moveCursorTo(nr, nc, null, options);
   }
 
@@ -1968,7 +1973,10 @@ export async function mountEditor(root, notebookId) {
     if (!activeWorkBlock) return;
     const { autoEnterSlot = true } = options;
     let nr = clamp(r, 0, activeWorkBlock.rows - 1);
-    let nc = clamp(c, 0, activeWorkBlock.cols - 1);
+    // Same MARGIN_COLS clamp as moveCursor — every navigation path runs
+    // through this function so doing it here covers arrow keys, tap-to-
+    // position, slot-enter, and the post-edit cursor advance.
+    let nc = clamp(c, MARGIN_COLS, activeWorkBlock.cols - 1);
 
     // If the target cell is occupied by a multi-cell composite anchored
     // elsewhere, redirect to the anchor — there's no rendered cell at the

@@ -500,11 +500,6 @@ h1 {
 .editor__page-content {
   position: relative;
   padding: 16px;
-  /* Reserved left gutter — a paper-style margin that no cells, worksheets or
-     work blocks can occupy. Pairs with the +96px term baked into the .grid
-     --cell-size calc so the bigger cells still fit within the remaining
-     horizontal space. */
-  padding-left: 96px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -558,11 +553,9 @@ h1 {
 
 /* In split view the work area is the bottleneck — shrink each grid cell
    ~20% so two more equation lines fit before the kid has to scroll. The
-   font size is bound to --cell-size so the digits scale with the cell.
-   The 184px term matches the wider padding chain (96px reserved left
-   gutter + 16px right + 50px page borders + 16px editor + 6px breathing). */
+   font size is bound to --cell-size so the digits scale with the cell. */
 .editor--split .grid {
-  --cell-size: min(42px, calc((100vw - 184px) / var(--cols) / 2));
+  --cell-size: min(42px, calc((100vw - 104px) / var(--cols) / 2));
 }
 
 /* --- Worksheet thumbnail-peek (split view) ---
@@ -784,12 +777,14 @@ h1 {
 .grid {
   /* Default 52px cell (bumped from 38px to give kids a bigger digit target),
      but shrink to fit when the grid would otherwise exceed the viewport
-     width. The 184px subtracted accounts for the full padding chain around
+     width. The 104px subtracted accounts for the full padding chain around
      the grid: editor--full padding (8 each side = 16), editor__page
-     padding+border (24+1 each side = 50), editor__page-content padding (16
-     right + 96 left = 112), plus ~6px breathing room. The 96px left term
-     is the reserved unusable margin defined on .editor__page-content. */
-  --cell-size: min(52px, calc((100vw - 184px) / var(--cols)));
+     padding+border (24+1 each side = 50), editor__page-content padding
+     (16 each side = 32), plus ~6px breathing room. The notebook-style
+     left "margin" is drawn INSIDE the grid via .cell--margin on the first
+     two columns — putting it outside used to eat into the per-cell width
+     on portrait iPad and actually shrunk the cells. */
+  --cell-size: min(52px, calc((100vw - 104px) / var(--cols)));
   display: grid;
   grid-template-columns: repeat(var(--cols), var(--cell-size));
   grid-template-rows: repeat(var(--rows), var(--cell-size));
@@ -840,6 +835,20 @@ h1 {
 }
 .cell[data-r="4"], .cell[data-r="9"], .cell[data-r="14"], .cell[data-r="19"] {
   border-bottom-color: #b8b8b8;
+}
+
+/* Reserved notebook margin on the left of every work block (see
+   MARGIN_COLS in js/page-model.js). The cells still paint grid lines so the
+   margin looks ruled rather than blank, but they're not interactive — taps
+   are swallowed by the grid click handler and the cursor's lower bound is
+   clamped to MARGIN_COLS. The bolder red border on the rightmost margin
+   column mirrors the red vertical line on Hebrew school notebooks. */
+.cell--margin {
+  background: #fff5f0;
+  cursor: default;
+}
+.cell--margin[data-c="1"] {
+  border-right: 1.5px solid #d12d2d;
 }
 
 /* Wide composites (multi-cell fractions) need their box to actually fill
