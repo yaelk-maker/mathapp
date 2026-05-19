@@ -1,7 +1,7 @@
 import { openDB, runInTransaction, requestToPromise } from '../vendor/idb.js';
 
 const DB_NAME = 'mathapp';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 // Recently-deleted notebooks live in the `trash` store for this long before
 // being permanently dropped on the next app start. 30 days mirrors iOS Photos
@@ -33,6 +33,13 @@ export async function getDB() {
     if (!db.objectStoreNames.contains('trash')) {
       db.createObjectStore('trash', { keyPath: 'id' });
     }
+    // v3: folders to group notebooks on the home screen. Notebooks gain a
+    // nullable `folderId` (null = top level). No data migration is needed —
+    // existing notebooks keep folderId === undefined which the home screen
+    // treats the same as null.
+    if (!db.objectStoreNames.contains('folders')) {
+      db.createObjectStore('folders', { keyPath: 'id' });
+    }
   });
   return _db;
 }
@@ -52,12 +59,13 @@ export async function getNotebook(id) {
   return db.get('notebooks', id);
 }
 
-export async function createNotebook(name) {
+export async function createNotebook(name, folderId = null) {
   const db = await getDB();
   const now = Date.now();
   const notebook = {
     id: uid('nb'),
     name,
+    folderId: folderId || null,
     createdAt: now,
     updatedAt: now
   };
@@ -256,6 +264,76 @@ export async function clearStrokesForPage(pageId) {
   await runInTransaction(db, ['strokes'], 'readwrite', (tx) => {
     for (const s of strokes) tx.objectStore('strokes').delete(s.id);
   });
+}
+
+// ---- Folders ----
+
+// Folders are pure groupings on the home screen — the kid sees a folder card
+// that, when tapped, opens a folder view listing the notebooks inside. A
+// notebook's `folderId` field points at one folder or is null (top level).
+export async function listFolders() {
+  const db = await getDB();
+  const all = await db.getAll('folders');
+  return all.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+export async function getFolder(id) {
+  const db = await getDB();
+  return db.get('folders', id);
+}
+
+export async function createFolder(name) {
+  const db = await getDB();
+  const now = Date.now();
+  const folder = {
+    id: uid('fl'),
+    name,
+    createdAt: now,
+    updatedAt: now
+  };
+  await db.put('folders', folder);
+  return folder;
+}
+
+export async function renameFolder(id, name) {
+  const db = await getDB();
+  const folder = await db.get('folders', id);
+  if (!folder) return null;
+  folder.name = name;
+  folder.updatedAt = Date.now();
+  await db.put('folders', folder);
+  return folder;
+}
+
+// Removing a folder doesn't delete the notebooks inside it — they get
+// promoted back to the top level (folderId = null). Deletion is destructive
+// for the folder record only; the kid never loses notebook content this way.
+export async function deleteFolder(id) {
+  const db = await getDB();
+  await runInTransaction(db, ['folders', 'notebooks'], 'readwrite', async (tx) => {
+    const notebooks = await requestToPromise(tx.objectStore('notebooks').getAll());
+    for (const nb of notebooks) {
+      if (nb.folderId === id) {
+        nb.folderId = null;
+        nb.updatedAt = Date.now();
+        tx.objectStore('notebooks').put(nb);
+      }
+    }
+    tx.objectStore('folders').delete(id);
+  });
+}
+
+// Move a single notebook into a folder (or back to the top level when
+// folderId is null). updatedAt is bumped so the home screen reflects the
+// reorder.
+export async function setNotebookFolder(notebookId, folderId) {
+  const db = await getDB();
+  const nb = await db.get('notebooks', notebookId);
+  if (!nb) return null;
+  nb.folderId = folderId || null;
+  nb.updatedAt = Date.now();
+  await db.put('notebooks', nb);
+  return nb;
 }
 
 export async function requestPersistentStorage() {
