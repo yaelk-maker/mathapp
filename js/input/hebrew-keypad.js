@@ -65,12 +65,19 @@ export function renderHebrewKeypad({ onKey }) {
   }
   lettersBlock.appendChild(punctRow);
 
-  // Bottom action row: mode-switch, wide Space, then ↑ ← ↓ →. The arrows
-  // moved off the right-hand cluster onto this row so the kid has a
-  // single bottom strip to scan.
+  // Bottom action row: math toggle, English toggle, wide Space, then arrows.
+  // Mirrors the English keypad's bottom row so both alphabet keypads expose
+  // a one-tap hop to the other alphabet AND back to math, matching iPadOS
+  // where the language globe sits next to the 123 key.
   const actionRow = document.createElement('div');
   actionRow.className = 'keypad__row keypad__row--bottom';
   actionRow.appendChild(makeKey(modeKey('מקלדת מתמטית'), onKey));
+  actionRow.appendChild(makeKey({
+    code: 'TOGGLE_ENGLISH',
+    label: 'ABC',
+    kind: 'mode',
+    title: 'מקלדת אנגלית'
+  }, onKey));
   actionRow.appendChild(makeKey({ code: 'SPACE', label: 'רווח', kind: 'space' }, onKey));
   actionRow.appendChild(makeKey({ code: 'UP', label: '↑', kind: 'nav' }, onKey));
   actionRow.appendChild(makeKey({ code: 'LEFT', label: '←', kind: 'nav' }, onKey));

@@ -198,6 +198,108 @@ export function promptDialog({
   });
 }
 
+// Hebrew picker dialog — radio-style list of mutually exclusive options
+// (used by the "move notebook to folder" flow). Each option is
+// `{ id, label }`. Resolves with the selected id on confirm, undefined on
+// cancel. `selectedId` preselects the matching option.
+export function pickDialog({
+  title = '',
+  body = '',
+  options = [],
+  selectedId = null,
+  confirmLabel = 'אישור',
+  cancelLabel = 'ביטול'
+} = {}) {
+  return new Promise((resolve) => {
+    const overlay = buildOverlay();
+    const dialog = buildDialog();
+
+    const titleEl = document.createElement('h2');
+    titleEl.className = 'dialog__title';
+    titleEl.textContent = title;
+
+    const bodyEl = document.createElement('p');
+    bodyEl.className = 'dialog__body';
+    bodyEl.textContent = body;
+
+    const list = document.createElement('div');
+    list.className = 'dialog__picker';
+    let chosenId = selectedId;
+    const itemEls = [];
+    for (const opt of options) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'dialog__picker-item';
+      // Keep a string-encoded form because dataset values are always strings
+      // and we still need to distinguish "" (root) from "id-of-some-folder".
+      item.dataset.optId = opt.id == null ? '' : String(opt.id);
+      item.textContent = opt.label;
+      if ((opt.id || null) === (chosenId || null)) {
+        item.classList.add('dialog__picker-item--selected');
+      }
+      item.addEventListener('click', () => {
+        chosenId = opt.id == null ? null : opt.id;
+        for (const el of itemEls) {
+          el.classList.toggle(
+            'dialog__picker-item--selected',
+            (el.dataset.optId || '') === (item.dataset.optId || '')
+          );
+        }
+      });
+      itemEls.push(item);
+      list.appendChild(item);
+    }
+
+    const buttons = document.createElement('div');
+    buttons.className = 'dialog__buttons';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'dialog__btn dialog__btn--primary';
+    confirmBtn.textContent = confirmLabel;
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'dialog__btn';
+    cancelBtn.textContent = cancelLabel;
+
+    buttons.appendChild(confirmBtn);
+    buttons.appendChild(cancelBtn);
+
+    if (title) dialog.appendChild(titleEl);
+    if (body) dialog.appendChild(bodyEl);
+    dialog.appendChild(list);
+    dialog.appendChild(buttons);
+    overlay.appendChild(dialog);
+
+    const close = (value) => {
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      resolve(value);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close(undefined);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        close(chosenId);
+      }
+    };
+
+    confirmBtn.addEventListener('click', () => close(chosenId));
+    cancelBtn.addEventListener('click', () => close(undefined));
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close(undefined);
+    });
+    document.addEventListener('keydown', onKey, true);
+
+    document.body.appendChild(overlay);
+    trapFocus(dialog);
+    confirmBtn.focus();
+  });
+}
+
 // Lightweight Hebrew toast for non-blocking confirmations like "שוחזרו N
 // מחברות". Replaces the alert() calls in main.js so we don't pop the native
 // English-chrome banner.

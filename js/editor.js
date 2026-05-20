@@ -48,6 +48,7 @@ import {
 } from './render/strokes.js';
 import { renderKeypad, keyboardEventToCode } from './input/keypad.js';
 import { renderHebrewKeypad } from './input/hebrew-keypad.js';
+import { renderEnglishKeypad } from './input/english-keypad.js';
 import { uploadWorksheet } from './io/import.js';
 import { attachPencilSurface } from './input/pencil.js';
 import { confirmDialog, promptDialog, notifySaveError, toast } from './ui/dialog.js';
@@ -151,10 +152,16 @@ export async function mountEditor(root, notebookId) {
     }
   }
 
-  // Keypad mode: 'math' (default) or 'hebrew'. Hebrew mode swaps in the
-  // letter keypad and routes presses into the active work block's grid
-  // (one Hebrew letter per cell, just like math digits).
+  // Keypad mode: 'math' (default), 'hebrew' or 'english'. Letter modes swap
+  // in their respective on-screen layouts and route presses into the active
+  // work block's grid (one letter per cell, just like math digits). The
+  // math keypad's ABC/123 toggle cycles math → english → hebrew → math so
+  // the kid can reach either alphabet with the same key.
   let keypadMode = 'math';
+  // Remember the alphabet the kid last used so coming OUT of math mode
+  // returns to whichever one she's been writing in (mirrors how iPadOS
+  // remembers the most recent non-numeric keyboard).
+  let lastAlphaMode = 'english';
 
   // Drawing state
   const strokes = await listStrokesByPage(page.id);
@@ -414,12 +421,18 @@ export async function mountEditor(root, notebookId) {
 
   function mountKeypad() {
     keypadHost.innerHTML = '';
+    // Reset the mode-tint classes before applying the active one so jumping
+    // straight from Hebrew to English (or vice-versa) doesn't leave a stale
+    // tint on the toggle key.
+    editorEl.classList.remove('editor--hebrew-mode', 'editor--english-mode');
     if (keypadMode === 'hebrew') {
       keypadHost.appendChild(renderHebrewKeypad({ onKey: handleHebrewKey }));
       editorEl.classList.add('editor--hebrew-mode');
+    } else if (keypadMode === 'english') {
+      keypadHost.appendChild(renderEnglishKeypad({ onKey: handleEnglishKey }));
+      editorEl.classList.add('editor--english-mode');
     } else {
       keypadHost.appendChild(renderKeypad({ onKey: handleKey }));
-      editorEl.classList.remove('editor--hebrew-mode');
     }
   }
 
@@ -518,6 +531,7 @@ export async function mountEditor(root, notebookId) {
   function setKeypadMode(mode) {
     if (mode === keypadMode) return;
     keypadMode = mode;
+    if (mode === 'hebrew' || mode === 'english') lastAlphaMode = mode;
     mountKeypad();
     requestAnimationFrame(() => resizeAndReplay());
   }
@@ -1500,6 +1514,10 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode('math');
       return;
     }
+    if (code === 'TOGGLE_ENGLISH') {
+      setKeypadMode('english');
+      return;
+    }
     if (!activeWorkBlock) return;
     switch (code) {
       case 'BACKSPACE': backspaceRTL(); return;
@@ -1516,6 +1534,33 @@ export async function mountEditor(root, notebookId) {
         // and advance the cursor LEFT so the next letter lands to the
         // left of this one (RTL flow).
         insertCharRTL(code);
+    }
+  }
+
+  // English keypad: LTR text flow into the same grid. Single ASCII letter
+  // (upper- or lowercase) or punctuation gets inserted into the active
+  // cell and the cursor advances to the right — same direction as math.
+  function handleEnglishKey(code) {
+    if (code === 'TOGGLE_KEYPAD') {
+      setKeypadMode('math');
+      return;
+    }
+    if (code === 'TOGGLE_HEBREW') {
+      setKeypadMode('hebrew');
+      return;
+    }
+    if (!activeWorkBlock) return;
+    switch (code) {
+      case 'BACKSPACE': backspace(); return;
+      case 'SPACE': arrowHorizontal(1); return;
+      case 'LEFT': arrowHorizontal(-1); return;
+      case 'RIGHT': arrowHorizontal(1); return;
+      case 'UP': arrowVertical(-1); return;
+      case 'DOWN': arrowVertical(1); return;
+      default:
+        // Single English letter or punctuation. insertChar already handles
+        // shift-row-right when overwriting, edge refusal, and queueSave.
+        insertChar(code);
     }
   }
 
@@ -1572,7 +1617,7 @@ export async function mountEditor(root, notebookId) {
 
   function handleKey(code) {
     if (code === 'TOGGLE_KEYPAD') {
-      setKeypadMode('hebrew');
+      setKeypadMode(lastAlphaMode);
       return;
     }
     if (!activeWorkBlock) return;

@@ -8,6 +8,12 @@ import {
   purgeNotebookFromTrash,
   purgeExpiredTrash,
   requestPersistentStorage,
+  listFolders,
+  getFolder,
+  createFolder,
+  renameFolder,
+  deleteFolder,
+  setNotebookFolder,
   TRASH_TTL_MS
 } from './db.js';
 import { mountEditor } from './editor.js';
@@ -19,7 +25,7 @@ import {
   pickJSONFile,
   readJSONFile
 } from './io/export.js';
-import { confirmDialog, promptDialog, toast, notifySaveError } from './ui/dialog.js';
+import { confirmDialog, promptDialog, pickDialog, toast, notifySaveError } from './ui/dialog.js';
 import { installSystemKeyboardBridge } from './ui/system-keyboard.js';
 
 // Press-and-hold duration for the destructive notebook delete. Matches the
@@ -87,6 +93,9 @@ async function render() {
   if (hash.startsWith('#/notebook/')) {
     const id = hash.slice('#/notebook/'.length);
     await renderEditor(id);
+  } else if (hash.startsWith('#/folder/')) {
+    const id = hash.slice('#/folder/'.length);
+    await renderFolder(id);
   } else if (hash === '#/trash') {
     await renderTrash();
   } else {
@@ -95,13 +104,34 @@ async function render() {
 }
 
 async function renderHome() {
-  const [notebooks, trashEntries] = await Promise.all([listNotebooks(), listTrash()]);
+  const [notebooks, folders, trashEntries] = await Promise.all([
+    listNotebooks(),
+    listFolders(),
+    listTrash()
+  ]);
   const trashCount = trashEntries.length;
+  // Top level shows notebooks NOT assigned to a folder. We also treat a
+  // notebook whose folderId points at a since-deleted folder as top-level
+  // — without this, a trashed-then-restored notebook from a gone folder
+  // would be invisible (no folder card to enter and no top-level row).
+  const folderIds = new Set(folders.map((f) => f.id));
+  const rootNotebooks = notebooks.filter(
+    (nb) => !nb.folderId || !folderIds.has(nb.folderId)
+  );
+  // Count notebooks per folder for the badge on each folder card. Same
+  // dangling-folderId guard as above.
+  const folderCounts = new Map();
+  for (const nb of notebooks) {
+    if (nb.folderId && folderIds.has(nb.folderId)) {
+      folderCounts.set(nb.folderId, (folderCounts.get(nb.folderId) || 0) + 1);
+    }
+  }
   root.innerHTML = `
     <div class="screen">
       <h1>MathApp</h1>
       <div class="toolbar">
         <button class="btn" id="new-notebook">+ מחברת חדשה</button>
+        <button class="btn btn--ghost" id="new-folder">+ תיקייה</button>
         <button class="btn btn--ghost" id="restore-all">📥 שחזור</button>
         <button class="btn btn--ghost" id="open-trash">🗑️ נמחקו לאחרונה${
           trashCount > 0 ? ` (${trashCount})` : ''
@@ -109,8 +139,9 @@ async function renderHome() {
       </div>
       <input type="search" class="search-input" id="notebook-search"
              placeholder="חיפוש לפי שם או תאריך..." aria-label="חיפוש מחברות"
-             ${notebooks.length === 0 ? 'hidden' : ''}>
-      <div id="notebook-list-host">${renderNotebookList(notebooks, '')}</div>
+             ${rootNotebooks.length === 0 && folders.length === 0 ? 'hidden' : ''}>
+      <div id="folder-list-host">${renderFolderList(folders, folderCounts, '')}</div>
+      <div id="notebook-list-host">${renderNotebookList(rootNotebooks, '', { folders })}</div>
     </div>
   `;
 
@@ -132,6 +163,25 @@ async function renderHome() {
       // when IDB rejects the create transaction). A Hebrew toast at least
       // tells her something actually went wrong.
       toast('יצירת המחברת נכשלה — נסי שוב.', { kind: 'error', duration: 3600 });
+    }
+  });
+
+  document.getElementById('new-folder').addEventListener('click', async () => {
+    try {
+      const count = (await listFolders()).length;
+      const name = await promptDialog({
+        title: 'תיקייה חדשה',
+        body: 'בחרי שם לתיקייה:',
+        defaultValue: `תיקייה ${count + 1}`,
+        confirmLabel: 'יצירה'
+      });
+      if (name == null || !name.trim()) return;
+      await createFolder(name.trim());
+      toast('התיקייה נוצרה.');
+      await render();
+    } catch (err) {
+      console.error('Create folder failed:', err);
+      toast('יצירת התיקייה נכשלה — נסי שוב.', { kind: 'error', duration: 3600 });
     }
   });
 
@@ -160,26 +210,34 @@ async function renderHome() {
 
   const searchInput = document.getElementById('notebook-search');
   const listHost = document.getElementById('notebook-list-host');
+  const folderHost = document.getElementById('folder-list-host');
   if (searchInput) {
     searchInput.addEventListener('input', () => {
-      listHost.innerHTML = renderNotebookList(notebooks, searchInput.value);
-      wireListHandlers(listHost);
+      const q = searchInput.value;
+      folderHost.innerHTML = renderFolderList(folders, folderCounts, q);
+      listHost.innerHTML = renderNotebookList(rootNotebooks, q, { folders });
+      wireFolderHandlers(folderHost);
+      wireListHandlers(listHost, { folders });
     });
   }
-  wireListHandlers(listHost);
+  wireFolderHandlers(folderHost);
+  wireListHandlers(listHost, { folders });
 }
 
-function renderNotebookList(notebooks, query) {
+function renderNotebookList(notebooks, query, { folders = [], emptyMessage } = {}) {
   if (notebooks.length === 0) {
     return `<div class="empty-state">
-              אין עדיין מחברות.<br>
-              לחץ על "+ מחברת חדשה" כדי להתחיל.
+              ${emptyMessage || 'אין עדיין מחברות.<br>לחץ על "+ מחברת חדשה" כדי להתחיל.'}
             </div>`;
   }
   const filtered = filterNotebooks(notebooks, query);
   if (filtered.length === 0) {
     return `<div class="empty-state">לא נמצאו מחברות תואמות.</div>`;
   }
+  // Show the move-to-folder button only when there's somewhere to move TO —
+  // i.e. at least one folder exists. Otherwise the button has nothing useful
+  // to do and would just clutter the row.
+  const showMove = (folders && folders.length > 0);
   return `<div class="notebook-list">
             ${filtered
               .map(
@@ -189,6 +247,7 @@ function renderNotebookList(notebooks, query) {
                   <div class="notebook-card__name">${escapeHtml(nb.name)}</div>
                   <div class="notebook-card__meta">${formatDate(nb.updatedAt)}</div>
                 </div>
+                ${showMove ? `<button class="notebook-card__action" data-move="${nb.id}" aria-label="העברה לתיקייה" title="העברה לתיקייה">📁</button>` : ''}
                 <button class="notebook-card__action" data-save="${nb.id}" aria-label="גיבוי" title="גיבוי לדרייב">💾</button>
                 <button class="notebook-card__delete" data-delete="${nb.id}"
                         aria-label="מחק (לחיצה ארוכה)" title="לחצי וחזיקי כדי למחוק"><span class="longpress-fill"></span>✕</button>
@@ -197,6 +256,116 @@ function renderNotebookList(notebooks, query) {
               )
               .join('')}
           </div>`;
+}
+
+// Folders list (home screen). A folder card opens the folder view and
+// carries a small count badge so the kid sees how many notebooks live
+// inside without having to enter it.
+function renderFolderList(folders, folderCounts, query) {
+  if (!folders || folders.length === 0) return '';
+  const q = (query || '').trim().toLowerCase();
+  const filtered = q
+    ? folders.filter((f) => (f.name || '').toLowerCase().includes(q))
+    : folders;
+  if (filtered.length === 0) return '';
+  return `<div class="folder-list">
+            ${filtered
+              .map((f) => {
+                const count = folderCounts.get(f.id) || 0;
+                return `
+              <div class="folder-card" data-folder-id="${f.id}" role="button" tabindex="0">
+                <div class="folder-card__icon" aria-hidden="true">📁</div>
+                <div class="folder-card__main">
+                  <div class="folder-card__name">${escapeHtml(f.name)}</div>
+                  <div class="folder-card__meta">${count} מחברות</div>
+                </div>
+                <button class="notebook-card__action" data-rename-folder="${f.id}" aria-label="שינוי שם" title="שינוי שם">✏️</button>
+                <button class="notebook-card__delete" data-delete-folder="${f.id}"
+                        aria-label="מחיקת תיקייה (לחיצה ארוכה)"
+                        title="לחצי וחזיקי כדי למחוק"><span class="longpress-fill"></span>✕</button>
+              </div>
+            `;
+              })
+              .join('')}
+          </div>`;
+}
+
+function wireFolderHandlers(folderHost) {
+  if (!folderHost) return;
+  for (const card of folderHost.querySelectorAll('.folder-card')) {
+    card.addEventListener('click', (event) => {
+      if (event.target.closest('[data-delete-folder]') ||
+          event.target.closest('[data-rename-folder]')) return;
+      const id = card.getAttribute('data-folder-id');
+      window.location.hash = `#/folder/${id}`;
+    });
+  }
+  for (const btn of folderHost.querySelectorAll('[data-rename-folder]')) {
+    btn.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const id = btn.getAttribute('data-rename-folder');
+      const folder = await getFolder(id);
+      if (!folder) return;
+      const name = await promptDialog({
+        title: 'שינוי שם תיקייה',
+        body: 'בחרי שם חדש לתיקייה:',
+        defaultValue: folder.name || '',
+        confirmLabel: 'שמירה'
+      });
+      if (name == null || !name.trim()) return;
+      await renameFolder(id, name.trim());
+      toast('שם התיקייה עודכן.');
+      await render();
+    });
+  }
+  for (const btn of folderHost.querySelectorAll('[data-delete-folder]')) {
+    wireFolderDeleteLongPress(btn);
+  }
+}
+
+// Folder delete: same long-press + confirm pattern as notebook delete, but
+// the dialog body explicitly tells the kid the notebooks INSIDE will move
+// back to the main screen, not vanish — folder deletion is non-destructive
+// for content.
+function wireFolderDeleteLongPress(btn) {
+  let timer = null;
+  let triggered = false;
+  const cancel = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    btn.classList.remove('notebook-card__delete--arming');
+  };
+  const begin = (event) => {
+    event.stopPropagation();
+    triggered = false;
+    btn.classList.add('notebook-card__delete--arming');
+    timer = setTimeout(async () => {
+      triggered = true;
+      btn.classList.remove('notebook-card__delete--arming');
+      const id = btn.getAttribute('data-delete-folder');
+      const folder = await getFolder(id);
+      if (!folder) return;
+      const ok = await confirmDialog({
+        title: 'מחיקת תיקייה',
+        body: `למחוק את התיקייה "${folder.name}"? המחברות שבתוכה יחזרו למסך הראשי.`,
+        confirmLabel: 'מחקי תיקייה',
+        cancelLabel: 'ביטול',
+        destructive: true
+      });
+      if (!ok) return;
+      await deleteFolder(id);
+      toast('התיקייה נמחקה.');
+      await render();
+    }, DELETE_LONGPRESS_MS);
+  };
+  btn.addEventListener('pointerdown', begin);
+  btn.addEventListener('pointerup', (event) => {
+    event.stopPropagation();
+    cancel();
+    if (!triggered) toast('להחזיק כדי למחוק');
+  });
+  btn.addEventListener('pointerleave', cancel);
+  btn.addEventListener('pointercancel', cancel);
+  btn.addEventListener('click', (event) => event.stopPropagation());
 }
 
 // Match against the notebook name AND the formatted date string. The kid
@@ -211,10 +380,12 @@ function filterNotebooks(notebooks, query) {
   });
 }
 
-function wireListHandlers(listHost) {
+function wireListHandlers(listHost, { folders = [] } = {}) {
   for (const card of listHost.querySelectorAll('.notebook-card')) {
     card.addEventListener('click', (event) => {
-      if (event.target.closest('[data-delete]') || event.target.closest('[data-save]')) return;
+      if (event.target.closest('[data-delete]') ||
+          event.target.closest('[data-save]') ||
+          event.target.closest('[data-move]')) return;
       const id = card.getAttribute('data-id');
       window.location.hash = `#/notebook/${id}`;
     });
@@ -240,6 +411,38 @@ function wireListHandlers(listHost) {
           cancelLabel: 'סגירה'
         });
       }
+    });
+  }
+
+  for (const btn of listHost.querySelectorAll('[data-move]')) {
+    btn.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const id = btn.getAttribute('data-move');
+      const nb = await getNotebook(id);
+      if (!nb) return;
+      // Build the destination list every click — folders may have been
+      // added/renamed since the home screen rendered. The "main screen"
+      // option is rendered with a null id so the kid can lift the
+      // notebook back out of its current folder.
+      const allFolders = await listFolders();
+      const options = [
+        { id: null, label: '📄 המסך הראשי' },
+        ...allFolders.map((f) => ({ id: f.id, label: `📁 ${f.name}` }))
+      ];
+      const target = await pickDialog({
+        title: 'העברה לתיקייה',
+        body: `לאן להעביר את "${nb.name}"?`,
+        options,
+        selectedId: nb.folderId || null,
+        confirmLabel: 'העברה'
+      });
+      if (target === undefined) return;
+      if ((nb.folderId || null) === (target || null)) return;
+      await setNotebookFolder(id, target);
+      toast(target
+        ? `המחברת הועברה לתיקייה.`
+        : `המחברת הועברה למסך הראשי.`);
+      await render();
     });
   }
 
@@ -303,6 +506,84 @@ function wireDeleteLongPress(btn) {
 
 async function renderEditor(notebookId) {
   await mountEditor(root, notebookId);
+}
+
+// Folder view — listing of notebooks bound to a single folder, with a "new
+// notebook" button that creates the new notebook inside this folder. If the
+// folder id no longer resolves (deleted from another tab) we bounce home so
+// the kid doesn't sit on an empty screen.
+async function renderFolder(folderId) {
+  const [folder, notebooks, folders] = await Promise.all([
+    getFolder(folderId),
+    listNotebooks(),
+    listFolders()
+  ]);
+  if (!folder) {
+    window.location.hash = '';
+    return;
+  }
+  const folderNotebooks = notebooks.filter((nb) => nb.folderId === folderId);
+  root.innerHTML = `
+    <div class="screen">
+      <div class="toolbar">
+        <button class="btn btn--ghost" id="folder-back">→ חזרה</button>
+      </div>
+      <h1>📁 ${escapeHtml(folder.name)}</h1>
+      <div class="toolbar">
+        <button class="btn" id="new-notebook-in-folder">+ מחברת חדשה</button>
+        <button class="btn btn--ghost" id="rename-folder">✏️ שינוי שם</button>
+      </div>
+      <input type="search" class="search-input" id="notebook-search"
+             placeholder="חיפוש לפי שם או תאריך..." aria-label="חיפוש מחברות"
+             ${folderNotebooks.length === 0 ? 'hidden' : ''}>
+      <div id="notebook-list-host">${renderNotebookList(folderNotebooks, '', { folders, emptyMessage: 'התיקייה ריקה.<br>לחץ על "+ מחברת חדשה" כדי להתחיל.' })}</div>
+    </div>
+  `;
+
+  document.getElementById('folder-back').addEventListener('click', () => {
+    window.location.hash = '';
+  });
+
+  document.getElementById('new-notebook-in-folder').addEventListener('click', async () => {
+    try {
+      const count = folderNotebooks.length;
+      const name = await promptDialog({
+        title: 'מחברת חדשה',
+        body: `יצירת מחברת חדשה בתיקייה "${folder.name}":`,
+        defaultValue: `מחברת ${count + 1}`,
+        confirmLabel: 'יצירה'
+      });
+      if (name == null || !name.trim()) return;
+      const nb = await createNotebook(name.trim(), folderId);
+      window.location.hash = `#/notebook/${nb.id}`;
+    } catch (err) {
+      console.error('Create notebook in folder failed:', err);
+      toast('יצירת המחברת נכשלה — נסי שוב.', { kind: 'error', duration: 3600 });
+    }
+  });
+
+  document.getElementById('rename-folder').addEventListener('click', async () => {
+    const name = await promptDialog({
+      title: 'שינוי שם תיקייה',
+      body: 'בחרי שם חדש לתיקייה:',
+      defaultValue: folder.name || '',
+      confirmLabel: 'שמירה'
+    });
+    if (name == null || !name.trim()) return;
+    await renameFolder(folderId, name.trim());
+    toast('שם התיקייה עודכן.');
+    await render();
+  });
+
+  const searchInput = document.getElementById('notebook-search');
+  const listHost = document.getElementById('notebook-list-host');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      listHost.innerHTML = renderNotebookList(folderNotebooks, searchInput.value, { folders });
+      wireListHandlers(listHost, { folders });
+    });
+  }
+  wireListHandlers(listHost, { folders });
 }
 
 async function renderTrash() {

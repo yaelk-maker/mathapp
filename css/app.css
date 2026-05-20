@@ -94,6 +94,45 @@ h1 {
   gap: 12px;
 }
 
+/* Folders list — sits ABOVE the notebooks on the home screen. A folder card
+   uses the same card chrome as a notebook so the visual rhythm of the page
+   stays consistent, with a leading 📁 glyph and a count badge on the
+   right-side meta line. */
+.folder-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.folder-card {
+  background: color-mix(in srgb, var(--card) 96%, var(--accent));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: transform 0.05s ease;
+}
+.folder-card:active { transform: scale(0.99); }
+.folder-card__icon {
+  font-size: 28px;
+  margin-inline-end: 12px;
+}
+.folder-card__main {
+  flex: 1;
+  min-width: 0;
+}
+.folder-card__name {
+  font-weight: 600;
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+.folder-card__meta {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .notebook-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -1831,6 +1870,96 @@ body.system-kbd-up .editor__keypad-host {
 }
 .dialog__btn--danger:active { background: #962a1f; }
 .dialog__btn:active { background: rgba(11, 108, 242, 0.06); }
+
+/* Picker dialog (move-notebook-to-folder). One row per destination; the
+   selected row gets an accent ring so the kid sees the current choice. */
+.dialog__picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.dialog__picker-item {
+  appearance: none;
+  text-align: start;
+  font-family: inherit;
+  font-size: 17px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  direction: rtl;
+}
+.dialog__picker-item:active { background: rgba(11, 108, 242, 0.06); }
+.dialog__picker-item--selected {
+  border-color: var(--accent);
+  background: rgba(11, 108, 242, 0.08);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* --- English keypad ---
+   Layout matches iPadOS English: 10-9-9 letter rows, punctuation strip,
+   then a bottom row with mode toggles, wide space, and an arrow cluster.
+   Shift / Caps Lock is the leftmost key on row 3; it cycles
+   off → shift (one capital) → caps lock (all caps until tapped off).
+   The visual state of the key indicates which mode is active so the kid
+   always sees whether the next press will produce an uppercase letter. */
+
+.keypad--english {
+  display: flex;
+  flex-direction: column;
+}
+.keypad--english .keypad__key {
+  font-family: -apple-system, "Helvetica Neue", "Arial", sans-serif;
+  font-size: 20px;
+  font-weight: 500;
+  text-transform: none;
+}
+.keypad__key--shift {
+  color: var(--accent);
+  background: #f7faff;
+  font-size: 20px;
+  font-weight: 700;
+}
+.keypad__key--shift:active { background: #cfdcfb; }
+/* Shift on (one capital) and Caps Lock on (all caps) both look "lit" but
+   the Caps Lock state has a stronger fill so the kid can tell them apart
+   at a glance — same visual cue as iPadOS. */
+.keypad__key--shift.keypad__key--shift-active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.keypad__key--shift.keypad__key--shift-locked {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(11, 108, 242, 0.25);
+}
+.keypad__key--shift.keypad__key--shift-locked::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  background: currentColor;
+  transform: translateX(-50%);
+  border-radius: 1px;
+}
+
+/* English-mode tint on the keypad-toggle key so the kid sees which alphabet
+   is loaded, mirroring the existing Hebrew-mode tint. */
+.editor--english-mode .keypad__key--mode {
+  background: #eef9f1;
+  color: #1f7a4a;
+}
 
 /* --- Hebrew-mode tint on the math/Hebrew toggle key.
    The mode badge is gone; the toggle key itself shifts hue when the
