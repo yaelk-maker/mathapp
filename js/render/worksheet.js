@@ -135,24 +135,76 @@ function buildAnnotationEl(annot, block, options) {
   el.style.top = `${(annot.y * 100).toFixed(3)}%`;
   el.style.width = `${(annot.w * 100).toFixed(3)}%`;
   el.style.fontSize = `${clampAnnotationFont(annot.fontSize || DEFAULT_ANNOTATION_FONT_CQH)}cqh`;
-  // Render the stored text. Use textContent so any stray HTML never lands
-  // here — we promised plaintext-only.
-  el.textContent = annot.text || '';
+  // annot.html stores the structured rendering — innerHTML containing our
+  // own controlled markup (fraction widgets, etc.). For pure-text
+  // annotations (and pre-fraction legacy blocks) we still have annot.text.
+  // Setting innerHTML is safe here because the HTML originates from our
+  // own writers, not from user-pasted markup (contenteditable is
+  // plaintext-only). Whichever field is present wins; falling back to
+  // textContent keeps old notebooks rendering correctly.
+  if (typeof annot.html === 'string' && annot.html.length > 0) {
+    el.innerHTML = annot.html;
+  } else {
+    el.textContent = annot.text || '';
+  }
 
   bindAnnotationInteractions(el, annot, block, options);
   return el;
 }
 
 function bindAnnotationInteractions(el, annot, block, options) {
+  // Tracks "has the kid actually put any text in this annotation". An
+  // annotation that's only ever been created (a stray tap) and never typed
+  // into is cleaned up on blur so the worksheet doesn't accumulate ghost
+  // "הקלידי…" placeholders all over the page. Once any character lands,
+  // even briefly, the annotation is considered intentional and survives a
+  // later empty-blur.
+  let everTyped = (annot.text || '').length > 0;
+  // Set by the long-press handler right before el.blur(), so the blur
+  // listener below knows this isn't an abandoned empty annotation but the
+  // gesture-initiated transition into manipulate mode.
+  let enteringManipulate = false;
+
   // ----- text edits -----
-  // Sync to the model on every input; persistence is debounced upstream.
-  // We deliberately do NOT auto-delete empty annotations on blur — the kid
-  // can use the 🗑 button in manipulate mode. Auto-deleting fights the
-  // long-press flow, which blurs the contenteditable before the kid has
-  // typed anything.
+  // Input events bubble up from nested editable slots (fraction num/den),
+  // so this single listener captures keystrokes regardless of whether the
+  // caret is in the root contenteditable or inside a structured composite.
   el.addEventListener('input', () => {
-    annot.text = el.textContent || '';
+    // Store as html when there's any structured content (fraction widgets
+    // etc.), otherwise fall back to plain text. textContent is always
+    // populated as a plain-text mirror so legacy code paths and the
+    // pristine-empty check stay simple. We strip the ZWSP we sprinkle
+    // into empty fraction slots so a brand-new fraction doesn't count
+    // as "typed" content.
+    annot.text = (el.textContent || '').replace(/\u200B/g, '');
+    const hasStructure = el.querySelector('.annot-frac') !== null;
+    if (hasStructure) {
+      annot.html = el.innerHTML;
+    } else if (annot.html !== undefined) {
+      // The kid removed the last composite — drop the html field so the
+      // annotation is once again a pure-text block.
+      delete annot.html;
+    }
+    // Inserting a structured composite (even with both slots empty)
+    // counts as intentional content. Without this, the post-insert
+    // input event runs before focus moves into the new fraction's
+    // numerator slot — meaning everTyped would still be false at the
+    // moment the root annotation blurs, and the cleanup listener would
+    // delete the annotation the kid was about to edit.
+    if (annot.text.length > 0 || hasStructure) everTyped = true;
     if (options.onAnnotationChanged) options.onAnnotationChanged(block.id);
+  });
+
+  // ----- pristine-empty cleanup on blur -----
+  // Delete an annotation that was created but never typed in. Skip when
+  // we're handing off to manipulate mode (long-press) — that flow blurs
+  // the contenteditable on purpose, and the kid hasn't abandoned the
+  // annotation, she's just moving it.
+  el.addEventListener('blur', () => {
+    if (enteringManipulate) { enteringManipulate = false; return; }
+    if (everTyped) return;
+    if (!options.onDeleteAnnotation) return;
+    options.onDeleteAnnotation(block.id, annot.id);
   });
 
   // ----- long-press to enter manipulate mode -----
@@ -176,6 +228,7 @@ function bindAnnotationInteractions(el, annot, block, options) {
     pressTimer = setTimeout(() => {
       pressTimer = null;
       suppressNextFocus = true;
+      enteringManipulate = true;
       el.blur();
       enterManipulateMode(el, annot, block, options);
     }, LONGPRESS_MS);

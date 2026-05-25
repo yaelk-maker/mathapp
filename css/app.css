@@ -813,6 +813,45 @@ h1 {
 }
 .worksheet__annot--manipulate:active { cursor: grabbing; }
 
+/* Stacked-fraction widget inside an annotation. Mirrors the work-block
+   grid's fraction render so the kid sees the same a/b shape whether
+   she's typing into a cell or onto the worksheet. The wrapper is
+   contenteditable=false (atomic from the parent annotation's POV);
+   the num and den slots each hold a focusable contenteditable for the
+   kid to type into. ZWSPs sprinkled inside keep the slots focusable
+   and tap-targetable when empty. */
+.annot-frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: middle;
+  margin: 0 0.12em;
+  font-size: 0.88em;
+  line-height: 1.0;
+}
+.annot-frac-num,
+.annot-frac-den {
+  display: block;
+  min-width: 0.7em;
+  padding: 0 0.18em;
+  text-align: center;
+  /* Hide the caret tint that would otherwise leak through the slot when
+     focused — the slot's own outline is enough of a focus cue. */
+  outline: none;
+}
+.annot-frac-num {
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 0.04em;
+}
+.annot-frac-den {
+  padding-top: 0.04em;
+}
+.annot-frac-num:focus,
+.annot-frac-den:focus {
+  background: rgba(11, 108, 242, 0.10);
+  border-radius: 2px;
+}
+
 .worksheet__annot-chrome {
   position: absolute;
   /* Default position: above the annotation. RTL-friendly because the
@@ -1902,6 +1941,12 @@ h1 {
   .worksheet__annot-chrome,
   .worksheet__annot-resize {
     display: none !important;
+  }
+  /* Fraction widget: drop focus tint when printing. The stacked layout
+     itself is correct from default styles. */
+  .annot-frac-num:focus,
+  .annot-frac-den:focus {
+    background: transparent !important;
   }
 }
 
