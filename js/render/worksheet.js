@@ -45,11 +45,19 @@ export async function renderWorksheetBlock(block, options = {}) {
   }
   if (url) {
     img.src = url;
+    wrapper.appendChild(img);
   } else {
-    img.alt = '— תמונת דף לא נמצאה —';
+    // Missing blob (e.g. orphaned blobId after a partial restore): a
+    // bare <img> with only `alt` set shows nothing on most browsers,
+    // so we render an explicit placeholder div instead. Worksheet QA
+    // flagged this as a blank-rectangle bug.
+    const missing = document.createElement('div');
+    missing.className = 'worksheet__image worksheet__image--missing';
+    missing.setAttribute('role', 'img');
+    missing.setAttribute('aria-label', 'תמונת דף לא נמצאה');
+    missing.textContent = '— תמונת דף לא נמצאה —';
+    wrapper.appendChild(missing);
   }
-
-  wrapper.appendChild(img);
 
   // --- Annotation overlay ---------------------------------------------------
   // Stacks exactly over the image (figure has zero padding, image is the
@@ -199,8 +207,14 @@ function bindAnnotationInteractions(el, annot, block, options) {
     manipulateBadge.addEventListener('pointerdown', (e) => e.stopPropagation());
     manipulateBadge.addEventListener('click', (e) => {
       e.stopPropagation();
-      el.blur();
+      // Order matters: set enteringManipulate BEFORE the blur. el.blur()
+      // fires the blur listener synchronously, which checks
+      // enteringManipulate to decide whether this is the long-press /
+      // badge transition or an abandoned-empty cleanup. With the flag
+      // set first, a pristine empty annotation that the kid taps the
+      // badge on isn't auto-deleted before manipulate mode opens.
       enteringManipulate = true;
+      el.blur();
       removeManipulateBadge();
       enterManipulateMode(el, annot, block, options);
     });
@@ -224,7 +238,13 @@ function bindAnnotationInteractions(el, annot, block, options) {
     // pristine-empty check stay simple. We strip the ZWSP we sprinkle
     // into empty fraction slots so a brand-new fraction doesn't count
     // as "typed" content.
-    annot.text = (el.textContent || '').replace(/\u200B/g, '');
+    // Plain-text mirror. For pure-text annotations this is just
+    // textContent with ZWSPs stripped. For annotations that contain
+    // fraction widgets, raw textContent runs the num and den slots
+    // together (e.g. '12' for 1/2), which loses the fraction's
+    // semantics in exports / accessibility readers. We walk the DOM
+    // and wrap each fraction as '(num)/(den)'. (Bilingual QA bug.)
+    annot.text = serializeAnnotationText(el);
     const hasStructure = el.querySelector('.annot-frac') !== null;
     if (hasStructure) {
       annot.html = el.innerHTML;
@@ -385,20 +405,26 @@ function buildManipulateChrome(el, annot, block, options, exit) {
     return b;
   };
 
-  chrome.appendChild(mkBtn('A−', 'הקטנת טקסט', () => {
-    annot.fontSize = clampAnnotationFont(
-      (annot.fontSize || DEFAULT_ANNOTATION_FONT_CQH) - ANNOTATION_FONT_STEP_CQH
-    );
+  // A−/A+ skip the dirty-write when the new clamped size equals the
+  // current one (i.e. the kid is at the min/max boundary). Without
+  // this, every press at the limit still queued a save for an
+  // unchanged value. (Annotations QA.)
+  const stepFont = (delta) => {
+    const current = annot.fontSize || DEFAULT_ANNOTATION_FONT_CQH;
+    const next = clampAnnotationFont(current + delta);
+    if (next === current) {
+      // Flash the button briefly so the kid sees the press registered
+      // but the limit was hit. CSS animation already exists for the
+      // longpress-fired flash; reuse the same class.
+      return false;
+    }
+    annot.fontSize = next;
     el.style.fontSize = `${annot.fontSize}cqh`;
     if (options.onAnnotationChanged) options.onAnnotationChanged(block.id);
-  }));
-  chrome.appendChild(mkBtn('A+', 'הגדלת טקסט', () => {
-    annot.fontSize = clampAnnotationFont(
-      (annot.fontSize || DEFAULT_ANNOTATION_FONT_CQH) + ANNOTATION_FONT_STEP_CQH
-    );
-    el.style.fontSize = `${annot.fontSize}cqh`;
-    if (options.onAnnotationChanged) options.onAnnotationChanged(block.id);
-  }));
+    return true;
+  };
+  chrome.appendChild(mkBtn('A−', 'הקטנת טקסט', () => stepFont(-ANNOTATION_FONT_STEP_CQH)));
+  chrome.appendChild(mkBtn('A+', 'הגדלת טקסט', () => stepFont(+ANNOTATION_FONT_STEP_CQH)));
   chrome.appendChild(mkBtn('🗑', 'מחיקה', () => {
     if (options.onDeleteAnnotation) {
       options.onDeleteAnnotation(block.id, annot.id);
@@ -603,4 +629,37 @@ function clamp(min, max, v) {
 }
 function clamp01(v) {
   return clamp(0, 1, v);
+}
+
+// Walk an annotation's DOM and produce a plain-text mirror that
+// preserves fraction semantics. textContent on the contenteditable
+// would emit "12" for a stacked 1/2, losing the slash. We emit
+// "(num)/(den)" for each fraction widget (parens only when needed).
+// (Bilingual QA bug.)
+function serializeAnnotationText(root) {
+  const strip = (s) => (s || '').replace(/​/g, '');
+  let out = '';
+  const walk = (node) => {
+    if (node.nodeType === 3 /* TEXT_NODE */) {
+      out += strip(node.nodeValue);
+      return;
+    }
+    if (node.nodeType !== 1 /* ELEMENT_NODE */) return;
+    if (node.classList && node.classList.contains('annot-frac')) {
+      const num = node.querySelector('.annot-frac-num');
+      const den = node.querySelector('.annot-frac-den');
+      const numText = strip(num ? num.textContent : '');
+      const denText = strip(den ? den.textContent : '');
+      // Parenthesize only when ambiguous: single digit or simple
+      // decimal stays bare ("1/2"), anything else gets parens
+      // ("(x+1)/(2y)"). Empty slot prints as "()" so the structure
+      // round-trips visibly.
+      const wrap = (t) => (/^-?\d+(\.\d+)?$/.test(t) ? t : `(${t})`);
+      out += `${numText ? wrap(numText) : '()'}/${denText ? wrap(denText) : '()'}`;
+      return;
+    }
+    for (const child of node.childNodes) walk(child);
+  };
+  walk(root);
+  return out;
 }

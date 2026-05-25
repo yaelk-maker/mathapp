@@ -196,14 +196,18 @@ export async function mountEditor(root, notebookId) {
 
   // Keypad mode: 'math' (default), 'hebrew' or 'english'. Letter modes swap
   // in their respective on-screen layouts and route presses into the active
-  // work block's grid (one letter per cell, just like math digits). The
-  // math keypad's ABC/123 toggle cycles math → english → hebrew → math so
-  // the kid can reach either alphabet with the same key.
+  // work block's grid (one letter per cell, just like math digits).
+  //
+  // Toggling: the math keypad's ABC/123 key hops to `lastAlphaMode` (the
+  // alphabet the kid was last in). The Hebrew and English keypads each
+  // have THREE escape keys — back to math (TOGGLE_KEYPAD), and a one-tap
+  // hop to the OTHER alphabet (TOGGLE_HEBREW / TOGGLE_ENGLISH). So the
+  // kid can always reach any of the three modes in at most two taps.
   let keypadMode = 'math';
-  // Remember the alphabet the kid last used so coming OUT of math mode
-  // returns to whichever one she's been writing in (mirrors how iPadOS
-  // remembers the most recent non-numeric keyboard).
-  let lastAlphaMode = 'english';
+  // Default `lastAlphaMode` is Hebrew because the kid is a Hebrew-first
+  // speaker — first time she taps ABC/123 from math, she should land
+  // on the Hebrew keypad rather than English. (Bilingual QA suggestion.)
+  let lastAlphaMode = 'hebrew';
 
   // Drawing state
   const strokes = await listStrokesByPage(page.id);
@@ -467,28 +471,40 @@ export async function mountEditor(root, notebookId) {
   }
   penToggleBtn.addEventListener('click', () => setPencilEnabled(!pencilEnabled));
 
+  // AbortController so every global listener added by this mount can
+  // be torn down together in cleanup. Without this, opening and closing
+  // notebooks accumulates stale pointerover/pointerdown/beforeunload/
+  // pagehide/visibilitychange handlers — each holding a reference to a
+  // dead `setPencilEnabled` and a dead canvas. Persistence QA flagged
+  // this as a memory leak + behavioral risk (pen-hover after a notebook
+  // switch would call setPencilEnabled on the OLD closure).
+  const mountListeners = new AbortController();
+  const mountSignal = mountListeners.signal;
+
   // Auto-detect Apple Pencil hover/touch. iPadOS 14+ fires pointer events
   // with pointerType="pen" both when the Pencil is hovering ~2 cm above
   // the screen AND when it touches down. Either signal means the kid is
-  // intending to draw, so flip pen mode on automatically — without this
-  // she has to manually toggle ✏️ every time she picks up the Pencil,
-  // which the accessibility audit flagged as needless mode-juggling
-  // for a kid with motor impairment. We DON'T auto-disable; the kid
-  // taps ✏️ off when she's done drawing, so a stray Pencil rest near
-  // the screen doesn't lock her out of typing.
+  // intending to draw, so flip pen mode on automatically. We DON'T
+  // auto-disable; the kid taps ✏️ off when done.
+  //
+  // Guard: if the kid currently has caret-in-annotation, do NOT flip
+  // pen mode — setPencilEnabled toggles annotateMode and re-renders,
+  // which would destroy the focused annotation's DOM mid-edit.
+  // (Annotations QA bug.)
+  const isAnnotationActive = () => {
+    const el = document.activeElement;
+    return !!(el && el.closest && el.closest('.worksheet__annot'));
+  };
   document.addEventListener('pointerover', (e) => {
-    if (e.pointerType === 'pen' && !pencilEnabled) {
+    if (e.pointerType === 'pen' && !pencilEnabled && !isAnnotationActive()) {
       setPencilEnabled(true);
     }
-  }, true);
-  // Pencil 1st-gen on older iPads may not fire pointerover hover events
-  // reliably. Cover the case where the first signal is a touchdown by
-  // also flipping on pointerdown.
+  }, { capture: true, signal: mountSignal });
   document.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'pen' && !pencilEnabled) {
+    if (e.pointerType === 'pen' && !pencilEnabled && !isAnnotationActive()) {
       setPencilEnabled(true);
     }
-  }, true);
+  }, { capture: true, signal: mountSignal });
 
   document.getElementById('toggle-eraser').addEventListener('click', (e) => {
     eraserMode = !eraserMode;
@@ -658,6 +674,11 @@ export async function mountEditor(root, notebookId) {
     window.removeEventListener('resize', resizeAndReplay);
     window.removeEventListener('beforeprint', injectPrintSnapshot);
     window.removeEventListener('afterprint', removePrintSnapshot);
+    // Tear down every listener that was added with { signal: mountSignal }
+    // — the pen auto-detect handlers and the lifecycle flush handlers.
+    // Without this, navigating away from a notebook leaks them across
+    // subsequent mounts (Persistence QA).
+    mountListeners.abort();
     resizeObserver.disconnect();
     detachPencilIfAny();
     flushSave();
@@ -714,6 +735,11 @@ export async function mountEditor(root, notebookId) {
           annotateMode,
           onCreateAnnotation: createAnnotation,
           onAnnotationChanged: (_blockId) => queueSave(),
+          // Push an undo snapshot when the kid enters manipulate mode
+          // (long-press or "⋯" badge), so subsequent drag / resize /
+          // A−/A+ changes can be undone with ↺. Without this, an
+          // accidental drag had no recovery path.
+          onAnnotationManipulateStart: (_blockId, _annotId) => pushUndo(),
           onDeleteAnnotation: deleteAnnotation
         });
       } else if (block.type === BLOCK.WORK) {
@@ -1348,7 +1374,23 @@ export async function mountEditor(root, notebookId) {
     const oldSectionIdx = sectionsBefore.findIndex((s) =>
       s.some((b) => b.id === blockId)
     );
+    const removedIdx = page.blocks.findIndex((b) => b.id === blockId);
     page.blocks = page.blocks.filter((b) => b.id !== blockId);
+    // If we removed a worksheet AND the immediately-following block is an
+    // EMPTY work block (typical for the paired-section layout used by
+    // multi-page PDF imports), drop the orphan too. Without this, the
+    // empty workblock was getting absorbed into the previous section and
+    // confused the pager. Only auto-remove when at least one workblock
+    // still remains on the page so the kid is never left without a
+    // typing area. (Worksheet QA.)
+    if (block.type === BLOCK.WORKSHEET && removedIdx >= 0 && removedIdx < page.blocks.length) {
+      const next = page.blocks[removedIdx];
+      if (next && next.type === BLOCK.WORK &&
+          (!next.cells || Object.keys(next.cells).length === 0) &&
+          page.blocks.some((b, i) => b.type === BLOCK.WORK && i !== removedIdx)) {
+        page.blocks.splice(removedIdx, 1);
+      }
+    }
     const sectionsAfter = computeSections();
     if (oldSectionIdx === activeSectionIndex) {
       if (activeSectionIndex >= sectionsAfter.length) {
@@ -1812,12 +1854,8 @@ export async function mountEditor(root, notebookId) {
   // Same as insertChar but advances the cursor LEFT (toward c=0) instead of
   // right. Used by the Hebrew keypad so typed text reads right-to-left.
   function insertCharRTL(ch) {
-    pushUndo();
     const r = cursor.r;
     const c = cursor.c;
-    // Mirror of insertChar's edge guard: the Hebrew cursor advances LEFT, so
-    // the "edge" here is c === 0. Refuse when the kid would otherwise silently
-    // overwrite the cell parked at column 0.
     const occupiedHere = !!activeWorkBlock.cells[`${r},${c}`];
     const atLeftEdge = c <= 0;
     if (occupiedHere && atLeftEdge) {
@@ -1825,16 +1863,69 @@ export async function mountEditor(root, notebookId) {
       notifyAtomEdge();
       return;
     }
+    // Occupancy check: if the cursor lands on a non-empty cell (e.g. the
+    // kid typed English LTR and now switched to Hebrew on the same row),
+    // INSERT before the existing cells by shifting the contiguous run
+    // LEFT — analogous to insertChar's shiftRowRightFrom but mirrored
+    // for the RTL flow. Without this, the new Hebrew letter silently
+    // overwrote the English atom that was sitting at (r, c). Bug
+    // surfaced by bilingual-input QA.
+    if (occupiedHere) {
+      if (!shiftRowLeftFrom(r, c)) {
+        flashRefuse(r, c, { reason: 'edge' });
+        notifyAtomEdge();
+        return;
+      }
+      pushUndo();
+      activeWorkBlock.cells[`${r},${c}`] = { ch };
+      // The leftward shift moved cells; updateCell only repaints one
+      // so re-render the row.
+      rerenderActiveGrid();
+      moveCursor(r, c - 1);
+      queueSave();
+      return;
+    }
 
+    pushUndo();
     activeWorkBlock.cells[`${r},${c}`] = { ch };
     updateCell(activeGrid, activeWorkBlock, r, c);
     if (c > 0) {
       moveCursor(r, c - 1);
     } else {
-      flashRefuse(r, c, { reason: 'edge' });
+      // Edge: the cell write SUCCEEDED but the cursor can't advance.
+      // Don't flash refuse here — the press was accepted. Just notify.
       notifyAtomEdge();
     }
     queueSave();
+  }
+
+  // RTL counterpart of shiftRowRightFrom — walks the contiguous non-empty
+  // run starting at (r, c) and shifts each cell one column to the LEFT.
+  // Returns false when the run already reaches column 0 (or the reserved
+  // margin) — caller flashes a refusal.
+  function shiftRowLeftFrom(r, c) {
+    const anchors = [];
+    let k = c;
+    while (k >= 0) {
+      const here = activeWorkBlock.cells[`${r},${k}`];
+      if (!here) break;
+      const w = compositeWidth(here);
+      anchors.push({ k, w });
+      k -= 1;
+    }
+    if (anchors.length === 0) return true;
+    const last = anchors[anchors.length - 1];
+    // Can't shift further left if the leftmost anchor is at or beyond
+    // the reserved margin.
+    if (last.k - 1 < 0) return false;
+    // Move from leftmost to rightmost so we don't overwrite a cell we
+    // haven't moved yet.
+    for (let i = anchors.length - 1; i >= 0; i -= 1) {
+      const a = anchors[i];
+      activeWorkBlock.cells[`${r},${a.k - 1}`] = activeWorkBlock.cells[`${r},${a.k}`];
+      delete activeWorkBlock.cells[`${r},${a.k}`];
+    }
+    return true;
   }
 
   // RTL backspace: the most recently typed cell sits to the RIGHT of the
@@ -1940,11 +2031,17 @@ export async function mountEditor(root, notebookId) {
     const frac = document.createElement('span');
     frac.className = 'annot-frac';
     frac.setAttribute('contenteditable', 'false');
+    // Force LTR inside the fraction so digit-flow in num/den is always
+    // left-to-right even when the surrounding annotation is Hebrew.
+    // Without this, a multi-character numerator could render mirrored.
+    // (Bilingual QA.)
+    frac.setAttribute('dir', 'ltr');
 
     const num = document.createElement('span');
     num.className = 'annot-frac-num';
     num.setAttribute('contenteditable', 'plaintext-only');
     num.setAttribute('inputmode', 'none');
+    num.setAttribute('dir', 'ltr');
     // ZWSP gives the slot a focusable text node + a hit target the kid
     // can tap to position the caret. Stripped on save.
     num.textContent = '​';
@@ -1953,6 +2050,7 @@ export async function mountEditor(root, notebookId) {
     den.className = 'annot-frac-den';
     den.setAttribute('contenteditable', 'plaintext-only');
     den.setAttribute('inputmode', 'none');
+    den.setAttribute('dir', 'ltr');
     den.textContent = '​';
 
     frac.append(num, den);
@@ -2064,12 +2162,36 @@ export async function mountEditor(root, notebookId) {
   // we care about (Safari since 5, Chrome since 4); if it ever throws we
   // fall back silently and let the kid tap-to-position.
   function annotationMoveCaret(annotEl, dir) {
+    // UP/DOWN inside a fraction slot moves between num and den
+    // (analogous to arrowVertical's behavior in work-block composites).
+    // Without this, the line-wise sel.modify just jumped the caret out
+    // of the widget entirely. (Bilingual QA.)
+    if (dir === 'UP' || dir === 'DOWN') {
+      if (annotEl.classList && annotEl.classList.contains('annot-frac-num') && dir === 'DOWN') {
+        const den = annotEl.parentElement && annotEl.parentElement.querySelector('.annot-frac-den');
+        if (den) { focusSlotEnd(den); return; }
+      }
+      if (annotEl.classList && annotEl.classList.contains('annot-frac-den') && dir === 'UP') {
+        const num = annotEl.parentElement && annotEl.parentElement.querySelector('.annot-frac-num');
+        if (num) { focusSlotEnd(num); return; }
+      }
+    }
     ensureCaretInside(annotEl);
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
     const direction = (dir === 'LEFT' || dir === 'UP') ? 'backward' : 'forward';
     const granularity = (dir === 'UP' || dir === 'DOWN') ? 'line' : 'character';
     try { sel.modify('move', direction, granularity); } catch (_) {}
+  }
+
+  function focusSlotEnd(slot) {
+    slot.focus();
+    const range = document.createRange();
+    range.selectNodeContents(slot);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
   }
 
   function getCellAt(r, c) {
@@ -2371,6 +2493,15 @@ export async function mountEditor(root, notebookId) {
           return;
         }
       }
+      // SQUARE (pow with presetExp) with NO atom to promote — refuse
+      // rather than dropping a base-less '²' floating on a blank cell.
+      // (Math QA bug.) Plain POW (no presetExp) falls through to the
+      // generic insert path so the kid can type the base manually
+      // afterwards.
+      if (presetExp) {
+        flashRefuse(r, c);
+        return;
+      }
     }
 
     const existing = getCellAt(r, c);
@@ -2462,6 +2593,12 @@ export async function mountEditor(root, notebookId) {
       updateCell(activeGrid, activeWorkBlock, r, nc);
       moveCursor(r, nc);
       queueSave();
+    } else {
+      // At column 0 with no cell here — backspace has nowhere to go.
+      // Was previously a silent no-op; Math QA flagged the lack of
+      // feedback. Flash the cell red briefly so the kid sees the press
+      // registered. (Throttled via notifyAtomEdge for the toast.)
+      flashRefuse(r, c, { reason: 'edge' });
     }
   }
 
@@ -2751,17 +2888,27 @@ export async function mountEditor(root, notebookId) {
   // pauses the WebKit JIT on `visibilitychange → hidden` and may not
   // resume before the page is torn down.
   function flushOnLifecycle() {
-    // Best-effort: kick the debounced save AND wait for any in-flight
-    // IDB transaction to commit. We can't actually block the unload, so
-    // the awaited promise mostly just gives the IDB write a chance to
+    // Best-effort: kick the debounced PAGE save AND nudge any in-flight
+    // stroke saves. Persistence QA flagged that the original version
+    // only touched flushSave() — a Pencil stroke just lifted before
+    // unload would be lost because addStroke's IDB write hadn't
+    // committed. We can't actually block the unload, so the awaited
+    // promises mostly just give the queued transactions a chance to
     // settle before the JIT pauses.
     try { flushSave(); } catch (_) {}
+    try {
+      // Read the global tracker if present; pendingStrokeSaves is
+      // declared inside the same closure (editor scope).
+      if (typeof pendingStrokeSaves !== 'undefined') {
+        Promise.allSettled([...pendingStrokeSaves]).catch(() => {});
+      }
+    } catch (_) {}
   }
-  window.addEventListener('beforeunload', flushOnLifecycle);
-  window.addEventListener('pagehide', flushOnLifecycle);
+  window.addEventListener('beforeunload', flushOnLifecycle, { signal: mountSignal });
+  window.addEventListener('pagehide', flushOnLifecycle, { signal: mountSignal });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushOnLifecycle();
-  });
+  }, { signal: mountSignal });
 }
 
 function clamp(n, lo, hi) {

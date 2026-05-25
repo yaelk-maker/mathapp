@@ -111,7 +111,14 @@ function loadPdfJs() {
         import.meta.url
       ).href;
       return pdfjs;
-    })();
+    })().catch((err) => {
+      // Don't permanently poison the singleton on a one-time failure
+      // (e.g. SW cache miss when offline). Persistence QA flagged this:
+      // a single load failure used to lock PDF imports out for the
+      // whole session. Reset so the next pick can retry.
+      pdfjsPromise = null;
+      throw err;
+    });
   }
   return pdfjsPromise;
 }
@@ -120,7 +127,14 @@ function loadPdfJs() {
 // WorksheetBlocks. The PNGs are stored under fresh blobIds so they
 // participate in the same lifecycle as photo uploads.
 async function renderPdfToBlocks(file) {
-  const pdfjs = await loadPdfJs();
+  let pdfjs;
+  try {
+    pdfjs = await loadPdfJs();
+  } catch (err) {
+    console.error('pdf.js failed to load:', err);
+    toast('שגיאה בטעינת ספריית ה-PDF — נסי שוב.', { kind: 'error', duration: 4200 });
+    return [];
+  }
   const buf = await file.arrayBuffer();
   let pdf;
   try {
