@@ -64,8 +64,45 @@ export function newWorksheetBlock({ blobId, naturalWidth, naturalHeight }) {
     id: blockId(),
     blobId,
     naturalWidth: naturalWidth || 0,
-    naturalHeight: naturalHeight || 0
+    naturalHeight: naturalHeight || 0,
+    annotations: []
   };
+}
+
+// Typed-text annotations that float on top of a worksheet image. Position and
+// width are stored as fractions of the rendered overlay (0..1) so they stay
+// anchored at any zoom / display size. fontSize is in `cqh` units — 1cqh is
+// 1% of the overlay's height — so text scales with the image the same way a
+// printed worksheet's body text would.
+export const DEFAULT_ANNOTATION_FONT_CQH = 2.5;
+export const ANNOTATION_FONT_MIN_CQH = 1.2;
+export const ANNOTATION_FONT_MAX_CQH = 8.0;
+export const ANNOTATION_FONT_STEP_CQH = 0.4;
+
+let _annotCounter = 0;
+function annotationId() {
+  _annotCounter += 1;
+  return `a_${Date.now().toString(36)}_${_annotCounter}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+export function newAnnotation({
+  x = 0.5,
+  y = 0.5,
+  w = 0.25,
+  fontSize = DEFAULT_ANNOTATION_FONT_CQH,
+  text = ''
+} = {}) {
+  return { id: annotationId(), x, y, w, fontSize, text };
+}
+
+export function getAnnotations(block) {
+  if (!block || !Array.isArray(block.annotations)) return [];
+  return block.annotations;
+}
+
+export function clampAnnotationFont(size) {
+  if (!Number.isFinite(size)) return DEFAULT_ANNOTATION_FONT_CQH;
+  return Math.min(ANNOTATION_FONT_MAX_CQH, Math.max(ANNOTATION_FONT_MIN_CQH, size));
 }
 
 export function cellKey(row, col) {

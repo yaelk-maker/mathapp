@@ -745,6 +745,128 @@ h1 {
 }
 .worksheet__delete:active { background: rgba(0, 0, 0, 0.8); }
 
+/* --- Worksheet annotation overlay ---
+   Floats on top of the worksheet image and hosts the kid's typed answers.
+   container-type:size makes the overlay a sizing container so each
+   annotation can set its font in cqh units (1cqh = 1% of overlay height).
+   That keeps text scaling with the rendered image — exactly what we want
+   for "type at worksheet body-text size". */
+.worksheet__overlay {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+  /* Pointer events pass through by default so the worksheet click handler
+     (tap-to-collapse, in split mode) still receives empty-area taps. The
+     overlay only claims pointer events while in annotate mode, when
+     tapping the empty area must create a new annotation. */
+  pointer-events: none;
+  z-index: 1;
+}
+.worksheet--annotate .worksheet__overlay {
+  pointer-events: auto;
+  /* Faint crosshair feedback so the kid knows the page is in "tap to add" mode. */
+  cursor: crosshair;
+}
+
+.worksheet__annot {
+  position: absolute;
+  /* Paper-like: no background, no border. Text alone sits on the worksheet. */
+  background: transparent;
+  border: none;
+  padding: 1px 2px;
+  margin: 0;
+  color: #111;
+  font-family: inherit;
+  line-height: 1.15;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Annotations are always interactive (tap to edit, long-press to lift),
+     even when the overlay itself doesn't capture pointer events. */
+  pointer-events: auto;
+  /* Suppress the iOS long-press text-selection menu — our long-press is
+     the lift-to-move gesture. The contenteditable still accepts caret
+     placement on tap. */
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+  /* Outline appears only when focused or being manipulated. */
+  border-radius: 3px;
+  transition: box-shadow 0.1s ease, background 0.1s ease;
+}
+.worksheet__annot:focus {
+  box-shadow: 0 0 0 1px rgba(11, 108, 242, 0.45);
+  background: rgba(11, 108, 242, 0.04);
+}
+.worksheet__annot:empty::before {
+  /* Placeholder so a freshly-placed empty annotation isn't invisible. */
+  content: 'הקלידי…';
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.worksheet__annot--manipulate {
+  box-shadow: 0 0 0 2px var(--accent);
+  background: rgba(11, 108, 242, 0.08);
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.worksheet__annot--manipulate:active { cursor: grabbing; }
+
+.worksheet__annot-chrome {
+  position: absolute;
+  /* Default position: above the annotation. RTL-friendly because the
+     buttons inside lay out LTR (A-, A+, 🗑, ✓) regardless of doc dir. */
+  bottom: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  gap: 4px;
+  background: #111;
+  color: white;
+  padding: 4px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  /* Chrome sits in its own font world so cqh-sized annotation text doesn't
+     resize the buttons. */
+  font-size: 13px;
+  font-family: inherit;
+  direction: ltr;
+  z-index: 2;
+}
+.worksheet__annot-btn {
+  border: none;
+  background: transparent;
+  color: white;
+  min-width: 32px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.worksheet__annot-btn:active { background: rgba(255, 255, 255, 0.18); }
+
+.worksheet__annot-resize {
+  position: absolute;
+  bottom: -8px;
+  /* RTL caveat: the worksheet figure inherits dir=rtl from <html>; we want
+     the resize handle on the visual right edge regardless, so use
+     `inset-inline-end: auto` and pin to physical right. */
+  right: -8px;
+  left: auto;
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border: 2px solid white;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
 /* Section pager bar — sits above the page area, centered. Only visible
    in split mode when the page has more than one section (otherwise there's
    nothing to page between). The bar's CSS is gated on .editor--split so
@@ -1764,6 +1886,22 @@ h1 {
   .worksheet, .workblock {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+  /* Annotations print as plain text — drop the focus ring, manipulate
+     outline, chrome and resize handle. The :empty placeholder is also
+     hidden so a never-used annotation doesn't print "הקלידי…" */
+  .worksheet__annot {
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+  .worksheet__annot--manipulate {
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+  .worksheet__annot:empty::before { content: none !important; }
+  .worksheet__annot-chrome,
+  .worksheet__annot-resize {
+    display: none !important;
   }
 }
 
