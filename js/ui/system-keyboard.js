@@ -22,6 +22,12 @@ function isFocusableInput(target) {
   // visible. The .dialog skip below still applies since dialogs anchor
   // themselves.
   if (target.isContentEditable) {
+    // inputmode="none" tells Safari to suppress its on-screen keyboard
+    // (used by worksheet annotations, which are driven by the in-app
+    // math keypad instead). Don't flip system-kbd-up for those — the
+    // class hides our keypad, and there's no iOS keyboard taking its
+    // place, so the kid would be left with nothing to type with.
+    if (target.inputMode === 'none') return false;
     if (target.closest && target.closest('.dialog')) return false;
     return true;
   }

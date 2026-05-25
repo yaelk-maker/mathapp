@@ -160,6 +160,22 @@ export async function mountEditor(root, notebookId) {
   // mode — drawing and typing-on-paper compete for the same gesture.
   let annotateMode = false;
 
+  // When the kid focuses a worksheet annotation, the in-app keypad routes
+  // its presses to insert text at the caret instead of into the active
+  // work-block cell. We discover the focused annotation by walking
+  // document.activeElement (rather than caching it) so a re-render that
+  // rebuilds the DOM doesn't leave us holding a stale node reference.
+  // The contenteditable suppresses the iPadOS keyboard via
+  // inputmode="none", and keypad buttons preventDefault on mousedown to
+  // avoid stealing focus from it.
+  function getFocusedAnnotation() {
+    const el = document.activeElement;
+    if (!el || !el.classList || !el.classList.contains('worksheet__annot')) {
+      return null;
+    }
+    return el;
+  }
+
   // Keypad mode: 'math' (default), 'hebrew' or 'english'. Letter modes swap
   // in their respective on-screen layouts and route presses into the active
   // work block's grid (one letter per cell, just like math digits). The
@@ -292,12 +308,9 @@ export async function mountEditor(root, notebookId) {
 
   // Annotate-mode toggle. Mutually exclusive with pen mode (the pencil canvas
   // claims pointer events when active, which would swallow taps meant for
-  // creating annotations). Also collapses the math keypad — that keypad
-  // routes presses to the active work block's grid, never to a worksheet
-  // annotation (annotations use the iOS system keyboard via contenteditable).
-  // Leaving it visible would invite the kid to tap "5" expecting it to land
-  // in the annotation. Re-renders so the worksheet picks up its
-  // .worksheet--annotate class and the overlay starts capturing taps.
+  // creating annotations). Keep the in-app keypad visible — annotation
+  // typing now routes through it (see getFocusedAnnotation + the
+  // annotation branches in handleKey/handleHebrewKey/handleEnglishKey).
   const annotateBtn = document.getElementById('toggle-annotate');
   annotateBtn.addEventListener('click', () => {
     annotateMode = !annotateMode;
@@ -307,7 +320,6 @@ export async function mountEditor(root, notebookId) {
       // toggle is more recent intent than the still-active pen state.
       setPencilEnabled(false);
     }
-    setKeypadCollapsed(annotateMode);
     renderBlocks();
   });
 
@@ -669,6 +681,14 @@ export async function mountEditor(root, notebookId) {
           onCellTap: (r, c) => {
             // Tapping a cell switches focus to that work block (if there
             // are several) and back to the math keypad.
+            //
+            // If a worksheet annotation currently has focus, blur it
+            // here — work-block cells aren't focus targets (no tabindex),
+            // so the tap alone wouldn't drop focus from the annotation,
+            // and the keypad would keep routing to it instead of into
+            // the cell the kid just tapped.
+            const annotEl = getFocusedAnnotation();
+            if (annotEl) annotEl.blur();
             if (activeWorkBlock !== block) {
               clearActiveCursorHighlight();
               activeWorkBlock = block;
@@ -1616,6 +1636,19 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode('english');
       return;
     }
+    // Annotation has focus — route presses to insert into the
+    // contenteditable instead of the work-block grid. Newline maps to '\n'
+    // (annotations support multi-line via white-space: pre-wrap).
+    const annotEl = getFocusedAnnotation();
+    if (annotEl) {
+      if (code === 'BACKSPACE') return annotationBackspace(annotEl);
+      if (code === 'SPACE')     return annotationInsert(annotEl, ' ');
+      if (code === 'NEWLINE')   return annotationInsert(annotEl, '\n');
+      if (code === 'LEFT' || code === 'RIGHT' || code === 'UP' || code === 'DOWN') {
+        return annotationMoveCaret(annotEl, code);
+      }
+      return annotationInsert(annotEl, code);
+    }
     if (!activeWorkBlock) return;
     switch (code) {
       case 'BACKSPACE': backspaceRTL(); return;
@@ -1646,6 +1679,15 @@ export async function mountEditor(root, notebookId) {
     if (code === 'TOGGLE_HEBREW') {
       setKeypadMode('hebrew');
       return;
+    }
+    const annotEl = getFocusedAnnotation();
+    if (annotEl) {
+      if (code === 'BACKSPACE') return annotationBackspace(annotEl);
+      if (code === 'SPACE')     return annotationInsert(annotEl, ' ');
+      if (code === 'LEFT' || code === 'RIGHT' || code === 'UP' || code === 'DOWN') {
+        return annotationMoveCaret(annotEl, code);
+      }
+      return annotationInsert(annotEl, code);
     }
     if (!activeWorkBlock) return;
     switch (code) {
@@ -1718,6 +1760,8 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode(lastAlphaMode);
       return;
     }
+    const annotEl = getFocusedAnnotation();
+    if (annotEl) return handleAnnotationMathKey(annotEl, code);
     if (!activeWorkBlock) return;
     if (CHAR_KEYS.has(code)) {
       insertChar(code);
@@ -1738,6 +1782,88 @@ export async function mountEditor(root, notebookId) {
       // visible space character, since math cells are single atoms.
       case 'SPACE': arrowHorizontal(1); break;
     }
+  }
+
+  // ---------- annotation keypad routing ----------
+  //
+  // An annotation is plain text — it can't host real composite cells the way
+  // a work-block grid does, so the math keypad's composite buttons fall back
+  // to unicode equivalents that print readably:
+  //   FRAC   → '/'  (a/b — same as fraction-slot ASCII fallback)
+  //   POW    → '²'  (the most common case; kid types ² explicitly for ³⁴…)
+  //   SQUARE → '²'
+  //   SQRT   → '√'
+  //   NROOT  → 'ⁿ√' (kid retypes the n if needed)
+  //   ABS    → '|'
+  //   EXIT   → no-op (no composite to escape)
+  // SPACE inserts a literal ' ' here (unlike work-block math, which uses it
+  // as an advance-cursor). Arrow keys move the caret natively.
+  const ANNOT_COMPOSITE_TEXT = {
+    FRAC: '/',
+    POW: '²',
+    SQUARE: '²',
+    SQRT: '√',
+    NROOT: 'ⁿ√',
+    ABS: '|'
+  };
+  function handleAnnotationMathKey(annotEl, code) {
+    if (CHAR_KEYS.has(code)) return annotationInsert(annotEl, code);
+    if (ANNOT_COMPOSITE_TEXT[code]) return annotationInsert(annotEl, ANNOT_COMPOSITE_TEXT[code]);
+    switch (code) {
+      case 'BACKSPACE': return annotationBackspace(annotEl);
+      case 'SPACE': return annotationInsert(annotEl, ' ');
+      case 'LEFT': case 'RIGHT': case 'UP': case 'DOWN':
+        return annotationMoveCaret(annotEl, code);
+      case 'EXIT': /* nothing to escape inside plain text */ return;
+    }
+  }
+
+  // Anchor the caret at end-of-text if the selection is missing or
+  // outside the annotation (happens on the first press right after the
+  // contenteditable receives focus from a tap that didn't land on a text
+  // node). Without this, execCommand has nowhere to act and silently
+  // no-ops.
+  function ensureCaretInside(annotEl) {
+    if (document.activeElement !== annotEl) annotEl.focus();
+    const sel = window.getSelection();
+    if (!sel) return;
+    if (sel.rangeCount && annotEl.contains(sel.anchorNode)) return;
+    const range = document.createRange();
+    range.selectNodeContents(annotEl);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // Insert `text` at the caret. execCommand('insertText') is technically
+  // deprecated but is still the most reliable way to put characters into a
+  // contenteditable across iPadOS Safari versions: it preserves the
+  // browser's undo stack, fires the input event, and handles surrogate
+  // pairs / IME edge cases natively. The input event in turn triggers
+  // the worksheet.js listener that syncs annot.text and calls queueSave.
+  function annotationInsert(annotEl, text) {
+    ensureCaretInside(annotEl);
+    document.execCommand('insertText', false, text);
+  }
+
+  function annotationBackspace(annotEl) {
+    ensureCaretInside(annotEl);
+    document.execCommand('delete', false, null);
+  }
+
+  // Move the caret one character in `dir`. Left/Right are horizontal in
+  // the annotation's text flow (Safari handles RTL automatically when the
+  // surrounding text is Hebrew). Up/Down are line-wise for multi-line
+  // annotations. sel.modify is non-standard but supported everywhere
+  // we care about (Safari since 5, Chrome since 4); if it ever throws we
+  // fall back silently and let the kid tap-to-position.
+  function annotationMoveCaret(annotEl, dir) {
+    ensureCaretInside(annotEl);
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const direction = (dir === 'LEFT' || dir === 'UP') ? 'backward' : 'forward';
+    const granularity = (dir === 'UP' || dir === 'DOWN') ? 'line' : 'character';
+    try { sel.modify('move', direction, granularity); } catch (_) {}
   }
 
   function getCellAt(r, c) {
