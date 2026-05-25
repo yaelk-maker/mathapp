@@ -117,9 +117,23 @@ export async function mountEditor(root, notebookId) {
   {
     let migrated = false;
     for (const block of page.blocks) {
-      if (block.type !== BLOCK.WORK) continue;
-      if (migrateWorkBlockMargin(block)) migrated = true;
-      if (migrateWorkBlockSize(block)) migrated = true;
+      if (block.type === BLOCK.WORK) {
+        if (migrateWorkBlockMargin(block)) migrated = true;
+        if (migrateWorkBlockSize(block)) migrated = true;
+      } else if (block.type === BLOCK.WORKSHEET && Array.isArray(block.annotations)) {
+        // Prune annotations that were created (often by stray taps in
+        // annotate mode) but never typed into. Pre-cleanup notebooks
+        // accumulated visible "הקלידי…" placeholders all over the
+        // worksheet because empty annotations persisted across saves.
+        // Future empties auto-delete on blur via worksheet.js; this
+        // catches the legacy ones.
+        const before = block.annotations.length;
+        block.annotations = block.annotations.filter(
+          (a) => (a.text && a.text.length > 0) ||
+                 (typeof a.html === 'string' && a.html.length > 0)
+        );
+        if (block.annotations.length !== before) migrated = true;
+      }
     }
     if (migrated) await savePage(page);
   }
@@ -162,17 +176,21 @@ export async function mountEditor(root, notebookId) {
 
   // When the kid focuses a worksheet annotation, the in-app keypad routes
   // its presses to insert text at the caret instead of into the active
-  // work-block cell. We discover the focused annotation by walking
+  // work-block cell. We discover the focused element by walking
   // document.activeElement (rather than caching it) so a re-render that
   // rebuilds the DOM doesn't leave us holding a stale node reference.
   // The contenteditable suppresses the iPadOS keyboard via
   // inputmode="none", and keypad buttons preventDefault on mousedown to
   // avoid stealing focus from it.
+  //
+  // Returns the focused editable element, which may be the annotation
+  // root OR a nested editable slot like a fraction's numerator/
+  // denominator. Returns null when focus is elsewhere on the page.
   function getFocusedAnnotation() {
     const el = document.activeElement;
-    if (!el || !el.classList || !el.classList.contains('worksheet__annot')) {
-      return null;
-    }
+    if (!el || !el.closest) return null;
+    if (!el.closest('.worksheet__annot')) return null;
+    if (!el.isContentEditable) return null;
     return el;
   }
 
@@ -1786,20 +1804,20 @@ export async function mountEditor(root, notebookId) {
 
   // ---------- annotation keypad routing ----------
   //
-  // An annotation is plain text — it can't host real composite cells the way
-  // a work-block grid does, so the math keypad's composite buttons fall back
-  // to unicode equivalents that print readably:
-  //   FRAC   → '/'  (a/b — same as fraction-slot ASCII fallback)
-  //   POW    → '²'  (the most common case; kid types ² explicitly for ³⁴…)
+  // Most math-keypad keys insert their character literally. FRAC builds a
+  // structured fraction widget (matching the work-block stacked render);
+  // the remaining composites have no clean structured representation in a
+  // free-text annotation so they fall back to unicode glyphs that the kid
+  // can read off the worksheet:
+  //   POW    → '²'  (kid retypes ³⁴⁵… as needed)
   //   SQUARE → '²'
   //   SQRT   → '√'
-  //   NROOT  → 'ⁿ√' (kid retypes the n if needed)
+  //   NROOT  → 'ⁿ√'
   //   ABS    → '|'
-  //   EXIT   → no-op (no composite to escape)
-  // SPACE inserts a literal ' ' here (unlike work-block math, which uses it
+  //   EXIT   → no-op (no composite to escape from in flat text)
+  // SPACE inserts a literal ' ' (unlike work-block math, which uses Space
   // as an advance-cursor). Arrow keys move the caret natively.
   const ANNOT_COMPOSITE_TEXT = {
-    FRAC: '/',
     POW: '²',
     SQUARE: '²',
     SQRT: '√',
@@ -1807,6 +1825,7 @@ export async function mountEditor(root, notebookId) {
     ABS: '|'
   };
   function handleAnnotationMathKey(annotEl, code) {
+    if (code === 'FRAC') return insertFractionWidget(annotEl);
     if (CHAR_KEYS.has(code)) return annotationInsert(annotEl, code);
     if (ANNOT_COMPOSITE_TEXT[code]) return annotationInsert(annotEl, ANNOT_COMPOSITE_TEXT[code]);
     switch (code) {
@@ -1816,6 +1835,71 @@ export async function mountEditor(root, notebookId) {
         return annotationMoveCaret(annotEl, code);
       case 'EXIT': /* nothing to escape inside plain text */ return;
     }
+  }
+
+  // Drop a stacked fraction at the caret. Structured DOM: a non-editable
+  // wrapper with two editable plaintext-only slots (numerator + denominator),
+  // each carrying inputmode="none" so the iOS keyboard stays suppressed
+  // when the kid taps into them. Focus lands in the numerator so the next
+  // keypress fills the top of the fraction; the kid taps (or arrows) into
+  // the denominator to fill the bottom.
+  function insertFractionWidget(annotEl) {
+    // No nested fractions for v1 — refuse when the caret already lives
+    // inside a fraction slot. Keeps the data model simple and the kid
+    // doesn't end up with hard-to-edit doubly-stacked rows.
+    if (annotEl.closest('.annot-frac')) return;
+    ensureCaretInside(annotEl);
+
+    const frac = document.createElement('span');
+    frac.className = 'annot-frac';
+    frac.setAttribute('contenteditable', 'false');
+
+    const num = document.createElement('span');
+    num.className = 'annot-frac-num';
+    num.setAttribute('contenteditable', 'plaintext-only');
+    num.setAttribute('inputmode', 'none');
+    // ZWSP gives the slot a focusable text node + a hit target the kid
+    // can tap to position the caret. Stripped on save.
+    num.textContent = '​';
+
+    const den = document.createElement('span');
+    den.className = 'annot-frac-den';
+    den.setAttribute('contenteditable', 'plaintext-only');
+    den.setAttribute('inputmode', 'none');
+    den.textContent = '​';
+
+    frac.append(num, den);
+
+    const sel = window.getSelection();
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(frac);
+    // Add a trailing ZWSP after the fraction so the caret has somewhere
+    // to land when the kid arrows out to the right.
+    const after = document.createTextNode('​');
+    range.setStartAfter(frac);
+    range.insertNode(after);
+
+    // Dispatch the input event BEFORE moving focus into the numerator.
+    // Focus-shift fires the root's blur listener, which would otherwise
+    // see everTyped=false and delete the annotation. The input handler
+    // observes the new .annot-frac and flips everTyped=true first, so
+    // the blur cleanup correctly leaves the annotation alone.
+    const rootAnnot = annotEl.closest('.worksheet__annot');
+    if (rootAnnot) {
+      rootAnnot.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    // Move focus into the numerator with the caret AFTER its ZWSP so the
+    // first keypress lands at the visual right (LTR digit flow) or left
+    // (RTL letter flow) of the slot, matching how text inputs there feel.
+    num.focus();
+    const numRange = document.createRange();
+    numRange.selectNodeContents(num);
+    numRange.collapse(false);
+    const numSel = window.getSelection();
+    numSel.removeAllRanges();
+    numSel.addRange(numRange);
   }
 
   // Anchor the caret at end-of-text if the selection is missing or
@@ -1848,7 +1932,42 @@ export async function mountEditor(root, notebookId) {
 
   function annotationBackspace(annotEl) {
     ensureCaretInside(annotEl);
+    // Special case: backspace inside a fraction slot whose entire fraction
+    // (both slots) is empty should kill the whole widget rather than
+    // get stuck deleting the slot's ZWSP forever. Without this the kid
+    // can land in an empty fraction and not be able to back out.
+    if (annotEl.classList.contains('annot-frac-num') ||
+        annotEl.classList.contains('annot-frac-den')) {
+      const frac = annotEl.closest('.annot-frac');
+      if (frac && fractionIsEmpty(frac)) {
+        const rootAnnot = frac.closest('.worksheet__annot');
+        const parent = frac.parentElement;
+        // Place the caret right before the soon-to-vanish fraction so
+        // the kid keeps a sensible position to type into.
+        const range = document.createRange();
+        range.setStartBefore(frac);
+        range.collapse(true);
+        parent.removeChild(frac);
+        if (rootAnnot) {
+          rootAnnot.focus();
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          rootAnnot.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        return;
+      }
+    }
     document.execCommand('delete', false, null);
+  }
+
+  // True when both slots of a fraction widget contain no user-typed text
+  // (only the ZWSP we sprinkle in to keep them focusable).
+  function fractionIsEmpty(frac) {
+    const num = frac.querySelector('.annot-frac-num');
+    const den = frac.querySelector('.annot-frac-den');
+    const text = (s) => (s ? (s.textContent || '').replace(/​/g, '') : '');
+    return text(num).length === 0 && text(den).length === 0;
   }
 
   // Move the caret one character in `dir`. Left/Right are horizontal in
