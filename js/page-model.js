@@ -20,15 +20,14 @@ export const COMPOSITE = Object.freeze({
   ABS: 'abs'
 });
 
-// 19 cols × 25 rows is calibrated for the bigger portrait-iPad cells
-// (after the cell-size cap was raised to 56px). At those defaults a
-// distribution line like 6x−3(2x−3)>(x+4)−4(x−1) still fits within the
-// writable area (24 - 2 margin = 22 → 19 - 2 margin = 17, slightly tighter
-// but acceptable now that digits are larger and easier to read), and the
-// kid sees ~25-30% bigger cells without scrolling. Notebooks created
-// before this change are shrunk on load via migrateWorkBlockSize, gated on
-// "the existing content actually fits" so kids never lose work.
-export const DEFAULT_GRID = Object.freeze({ rows: 25, cols: 19 });
+// 25 cols × 25 rows. Was 19×25, but Math QA found that the README's
+// headline distribution line — 6x−3(2x−3)>(x+4)−4(x−1), 23 atoms —
+// did NOT fit in the previous 17 writable columns (19 - 2 margin).
+// Bumping to 25 cols gives 23 writable columns, leaving exactly one
+// column of slack for the inequality. Notebooks created before this
+// change still load at their stored size; migrateWorkBlockSize only
+// shrinks (never grows), so existing kids' notebooks see no jump.
+export const DEFAULT_GRID = Object.freeze({ rows: 25, cols: 25 });
 
 // Reserved "notebook margin" on the left of every work block. The first
 // MARGIN_COLS columns render with the same grid lines as the rest of the

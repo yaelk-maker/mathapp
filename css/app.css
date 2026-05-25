@@ -764,6 +764,18 @@ h1 {
   border-radius: 6px;
   background: white;
 }
+.worksheet__image--missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  width: 100%;
+  background: #f5f5f5;
+  color: #777;
+  font-size: 0.875rem;
+  border: 1px dashed #ccc;
+  border-radius: 6px;
+}
 
 .worksheet__delete {
   position: absolute;
@@ -2066,6 +2078,10 @@ h1 {
   .editor__topbar,
   .editor__actions,
   .editor__keypad-host,
+  .editor__keypad-show,
+  .editor__chrome-toggle,
+  .editor__section-bar,
+  .pen-mode-indicator,
   .pencil-canvas,
   #app > .screen .toolbar,
   .notebook-card__delete {

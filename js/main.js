@@ -37,7 +37,19 @@ const root = document.getElementById('app');
 
 async function init() {
   // Ask for persistent storage so iPadOS doesn't evict the kid's homework.
+  // iPadOS Safari usually rejects this on cold-load (no user activation
+  // yet), so we also retry once on the first user gesture — the moment
+  // she taps anything is sufficient activation. Persistence QA flagged
+  // the cold-load rejection.
   await requestPersistentStorage();
+  let retriedPersist = false;
+  const retryPersist = async () => {
+    if (retriedPersist) return;
+    retriedPersist = true;
+    document.removeEventListener('pointerdown', retryPersist, true);
+    try { await requestPersistentStorage(); } catch (_) {}
+  };
+  document.addEventListener('pointerdown', retryPersist, true);
 
   // Drop trash entries older than 30 days before the first render so the kid
   // sees an accurate "נמחקו לאחרונה" count. Best-effort: a failure here

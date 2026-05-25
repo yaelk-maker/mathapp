@@ -57,12 +57,21 @@ export function renderHebrewKeypad({ onKey }) {
     lettersBlock.appendChild(rowEl);
   });
 
-  // Punctuation row — sits above the bottom action row.
+  // Punctuation row — sits above the bottom action row. Includes a
+  // NEWLINE key so the kid can drop to the next row in Hebrew text
+  // without an arrow-key shuffle. handleHebrewKey already handles
+  // NEWLINE; previously no on-screen key emitted it. (Bilingual QA bug.)
   const punctRow = document.createElement('div');
   punctRow.className = 'keypad__row keypad__row--punct';
   for (const ch of PUNCTUATION) {
     punctRow.appendChild(makeKey({ code: ch, label: ch, kind: 'op' }, onKey));
   }
+  punctRow.appendChild(makeKey({
+    code: 'NEWLINE',
+    label: '⏎',
+    kind: 'edit',
+    title: 'שורה חדשה'
+  }, onKey));
   lettersBlock.appendChild(punctRow);
 
   // Bottom action row: math toggle, English toggle, wide Space, then arrows.
