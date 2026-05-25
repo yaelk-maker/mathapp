@@ -250,7 +250,7 @@ function renderNotebookList(notebooks, query, { folders = [], emptyMessage } = {
                 ${showMove ? `<button class="notebook-card__action" data-move="${nb.id}" aria-label="העברה לתיקייה" title="העברה לתיקייה">📁</button>` : ''}
                 <button class="notebook-card__action" data-save="${nb.id}" aria-label="גיבוי" title="גיבוי לדרייב">💾</button>
                 <button class="notebook-card__delete" data-delete="${nb.id}"
-                        aria-label="מחק (לחיצה ארוכה)" title="לחצי וחזיקי כדי למחוק"><span class="longpress-fill"></span>✕</button>
+                        aria-label="מחק" title="העברה לנמחקו לאחרונה">✕</button>
               </div>
             `
               )
@@ -281,8 +281,8 @@ function renderFolderList(folders, folderCounts, query) {
                 </div>
                 <button class="notebook-card__action" data-rename-folder="${f.id}" aria-label="שינוי שם" title="שינוי שם">✏️</button>
                 <button class="notebook-card__delete" data-delete-folder="${f.id}"
-                        aria-label="מחיקת תיקייה (לחיצה ארוכה)"
-                        title="לחצי וחזיקי כדי למחוק"><span class="longpress-fill"></span>✕</button>
+                        aria-label="מחיקת תיקייה"
+                        title="מחיקת תיקייה">✕</button>
               </div>
             `;
               })
@@ -323,49 +323,29 @@ function wireFolderHandlers(folderHost) {
   }
 }
 
-// Folder delete: same long-press + confirm pattern as notebook delete, but
-// the dialog body explicitly tells the kid the notebooks INSIDE will move
-// back to the main screen, not vanish — folder deletion is non-destructive
-// for content.
+// Folder delete: tap → confirm dialog. The dialog body explicitly tells
+// the kid the notebooks INSIDE will move back to the main screen, not
+// vanish — folder deletion is non-destructive for content. The old
+// long-press gate was removed (accessibility audit) because the
+// confirm dialog alone is sufficient safety for a dedicated × button.
 function wireFolderDeleteLongPress(btn) {
-  let timer = null;
-  let triggered = false;
-  const cancel = () => {
-    if (timer) { clearTimeout(timer); timer = null; }
-    btn.classList.remove('notebook-card__delete--arming');
-  };
-  const begin = (event) => {
+  btn.addEventListener('click', async (event) => {
     event.stopPropagation();
-    triggered = false;
-    btn.classList.add('notebook-card__delete--arming');
-    timer = setTimeout(async () => {
-      triggered = true;
-      btn.classList.remove('notebook-card__delete--arming');
-      const id = btn.getAttribute('data-delete-folder');
-      const folder = await getFolder(id);
-      if (!folder) return;
-      const ok = await confirmDialog({
-        title: 'מחיקת תיקייה',
-        body: `למחוק את התיקייה "${folder.name}"? המחברות שבתוכה יחזרו למסך הראשי.`,
-        confirmLabel: 'מחקי תיקייה',
-        cancelLabel: 'ביטול',
-        destructive: true
-      });
-      if (!ok) return;
-      await deleteFolder(id);
-      toast('התיקייה נמחקה.');
-      await render();
-    }, DELETE_LONGPRESS_MS);
-  };
-  btn.addEventListener('pointerdown', begin);
-  btn.addEventListener('pointerup', (event) => {
-    event.stopPropagation();
-    cancel();
-    if (!triggered) toast('להחזיק כדי למחוק');
+    const id = btn.getAttribute('data-delete-folder');
+    const folder = await getFolder(id);
+    if (!folder) return;
+    const ok = await confirmDialog({
+      title: 'מחיקת תיקייה',
+      body: `למחוק את התיקייה "${folder.name}"? המחברות שבתוכה יחזרו למסך הראשי.`,
+      confirmLabel: 'מחקי תיקייה',
+      cancelLabel: 'ביטול',
+      destructive: true
+    });
+    if (!ok) return;
+    await deleteFolder(id);
+    toast('התיקייה נמחקה.');
+    await render();
   });
-  btn.addEventListener('pointerleave', cancel);
-  btn.addEventListener('pointercancel', cancel);
-  btn.addEventListener('click', (event) => event.stopPropagation());
 }
 
 // Match against the notebook name AND the formatted date string. The kid
@@ -451,57 +431,30 @@ function wireListHandlers(listHost, { folders = [] } = {}) {
   }
 }
 
-// Delete is destructive and irrevocable — gate it behind a press-and-hold
-// (DELETE_LONGPRESS_MS) plus a Hebrew confirmation. A short tap shows a
-// helpful toast instead of opening the dialog, so a kid who brushes the
-// button in passing doesn't escalate into a destructive flow.
+// Notebook delete is destructive — a Hebrew confirmation dialog is the
+// safety net, and the 30-day trash gives a kid 30 days to undo. Was
+// originally also gated behind a 700ms long-press, but that combined
+// gesture is hard for a kid with reduced fine-motor control (the
+// accessibility audit flagged it); the confirm dialog alone is enough
+// of a safeguard for this UI affordance (the dedicated × button on the
+// card the kid is intentionally interacting with).
 function wireDeleteLongPress(btn) {
-  let timer = null;
-  let triggered = false;
-
-  const cancel = () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    btn.classList.remove('notebook-card__delete--arming');
-  };
-
-  const begin = (event) => {
+  btn.addEventListener('click', async (event) => {
     event.stopPropagation();
-    triggered = false;
-    btn.classList.add('notebook-card__delete--arming');
-    timer = setTimeout(async () => {
-      triggered = true;
-      btn.classList.remove('notebook-card__delete--arming');
-      const id = btn.getAttribute('data-delete');
-      const nb = await getNotebook(id);
-      if (!nb) return;
-      const ok = await confirmDialog({
-        title: 'העברה לנמחקו לאחרונה',
-        body: `להעביר את "${nb.name}" לסל "נמחקו לאחרונה"? אפשר לשחזר אותה תוך 30 יום.`,
-        confirmLabel: 'העבירי לסל',
-        cancelLabel: 'ביטול'
-      });
-      if (!ok) return;
-      await deleteNotebook(id);
-      toast('המחברת הועברה לנמחקו לאחרונה.');
-      await render();
-    }, DELETE_LONGPRESS_MS);
-  };
-
-  btn.addEventListener('pointerdown', begin);
-  btn.addEventListener('pointerup', (event) => {
-    event.stopPropagation();
-    cancel();
-    if (!triggered) {
-      toast('להחזיק כדי למחוק');
-    }
+    const id = btn.getAttribute('data-delete');
+    const nb = await getNotebook(id);
+    if (!nb) return;
+    const ok = await confirmDialog({
+      title: 'העברה לנמחקו לאחרונה',
+      body: `להעביר את "${nb.name}" לסל "נמחקו לאחרונה"? אפשר לשחזר אותה תוך 30 יום.`,
+      confirmLabel: 'העבירי לסל',
+      cancelLabel: 'ביטול'
+    });
+    if (!ok) return;
+    await deleteNotebook(id);
+    toast('המחברת הועברה לנמחקו לאחרונה.');
+    await render();
   });
-  btn.addEventListener('pointerleave', cancel);
-  btn.addEventListener('pointercancel', cancel);
-  // Suppress the synthetic click that would normally bubble to the card.
-  btn.addEventListener('click', (event) => event.stopPropagation());
 }
 
 async function renderEditor(notebookId) {
@@ -631,8 +584,8 @@ function renderTrashList(entries) {
                 <button class="notebook-card__action" data-restore="${entry.id}"
                         aria-label="שחזור" title="שחזור">↩️</button>
                 <button class="notebook-card__delete" data-purge="${entry.id}"
-                        aria-label="מחק לתמיד (לחיצה ארוכה)"
-                        title="לחצי וחזיקי כדי למחוק לתמיד"><span class="longpress-fill"></span>✕</button>
+                        aria-label="מחק לתמיד"
+                        title="מחק לתמיד">✕</button>
               </div>
             `;
               })
@@ -661,53 +614,26 @@ function wireTrashHandlers(listHost) {
   }
 }
 
-// Same long-press pattern as the home-screen delete, but the dialog wording
-// is harsher and the action is genuinely irreversible — purgeNotebookFromTrash
-// drops the snapshot blob bytes and there's no second safety net.
+// Purge from trash is genuinely irreversible — purgeNotebookFromTrash
+// drops the snapshot blob bytes and there's no second safety net. The
+// long-press was removed (accessibility audit) but the confirm dialog
+// keeps its destructive styling and pointed wording so a deliberate
+// tap is still required.
 function wirePurgeLongPress(btn) {
-  let timer = null;
-  let triggered = false;
-
-  const cancel = () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    btn.classList.remove('notebook-card__delete--arming');
-  };
-
-  const begin = (event) => {
+  btn.addEventListener('click', async (event) => {
     event.stopPropagation();
-    triggered = false;
-    btn.classList.add('notebook-card__delete--arming');
-    timer = setTimeout(async () => {
-      triggered = true;
-      btn.classList.remove('notebook-card__delete--arming');
-      const id = btn.getAttribute('data-purge');
-      const ok = await confirmDialog({
-        title: 'מחיקה לצמיתות',
-        body: 'למחוק את המחברת לתמיד? אי אפשר לשחזר אחרי הפעולה הזו.',
-        confirmLabel: 'כן, מחקי לתמיד',
-        cancelLabel: 'ביטול',
-        destructive: true
-      });
-      if (!ok) return;
-      await purgeNotebookFromTrash(id);
-      await renderTrash();
-    }, DELETE_LONGPRESS_MS);
-  };
-
-  btn.addEventListener('pointerdown', begin);
-  btn.addEventListener('pointerup', (event) => {
-    event.stopPropagation();
-    cancel();
-    if (!triggered) {
-      toast('להחזיק כדי למחוק לתמיד');
-    }
+    const id = btn.getAttribute('data-purge');
+    const ok = await confirmDialog({
+      title: 'מחיקה לצמיתות',
+      body: 'למחוק את המחברת לתמיד? אי אפשר לשחזר אחרי הפעולה הזו.',
+      confirmLabel: 'כן, מחקי לתמיד',
+      cancelLabel: 'ביטול',
+      destructive: true
+    });
+    if (!ok) return;
+    await purgeNotebookFromTrash(id);
+    await renderTrash();
   });
-  btn.addEventListener('pointerleave', cancel);
-  btn.addEventListener('pointercancel', cancel);
-  btn.addEventListener('click', (event) => event.stopPropagation());
 }
 
 function escapeHtml(s) {
