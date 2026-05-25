@@ -122,6 +122,11 @@ function buildAnnotationEl(annot, block, options) {
   el.className = 'worksheet__annot';
   el.dataset.annotId = annot.id;
   el.setAttribute('contenteditable', 'plaintext-only');
+  // Suppress the iPadOS system keyboard — the kid drives this contenteditable
+  // through the in-app math/Hebrew/English keypad instead. Without
+  // inputmode="none" Safari pops its own keyboard on focus and the kid sees
+  // two keyboards (iOS + app) fighting for the bottom of the screen.
+  el.setAttribute('inputmode', 'none');
   el.setAttribute('dir', 'auto');
   // spellcheck off — Hebrew schoolwork mixes digits and math symbols, the
   // red underlines just clutter the worksheet.
