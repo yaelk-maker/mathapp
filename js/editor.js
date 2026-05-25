@@ -32,7 +32,9 @@ import {
   newAbsCell,
   MARGIN_COLS,
   migrateWorkBlockMargin,
-  migrateWorkBlockSize
+  migrateWorkBlockSize,
+  newAnnotation,
+  getAnnotations
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
 import {
@@ -152,6 +154,12 @@ export async function mountEditor(root, notebookId) {
     }
   }
 
+  // Annotate mode: when true, tapping an empty area of a worksheet image
+  // drops a new typed-text annotation at that point. Off by default; the
+  // kid toggles it with the 📝 toolbar button. Mutually exclusive with pen
+  // mode — drawing and typing-on-paper compete for the same gesture.
+  let annotateMode = false;
+
   // Keypad mode: 'math' (default), 'hebrew' or 'english'. Letter modes swap
   // in their respective on-screen layouts and route presses into the active
   // work block's grid (one letter per cell, just like math digits). The
@@ -201,6 +209,7 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↺ <span class="label">ביטול</span></button>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת תמונה" title="צילום או בחירת תמונה">📷 <span class="label">תמונה</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate" aria-label="כתיבה על דף" title="כתיבה על דף">📝 <span class="label">כתיבה על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
           <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
@@ -280,6 +289,27 @@ export async function mountEditor(root, notebookId) {
     addWorksheet({ capture: false })
   );
   document.getElementById('add-work').addEventListener('click', () => addWorkBlock());
+
+  // Annotate-mode toggle. Mutually exclusive with pen mode (the pencil canvas
+  // claims pointer events when active, which would swallow taps meant for
+  // creating annotations). Also collapses the math keypad — that keypad
+  // routes presses to the active work block's grid, never to a worksheet
+  // annotation (annotations use the iOS system keyboard via contenteditable).
+  // Leaving it visible would invite the kid to tap "5" expecting it to land
+  // in the annotation. Re-renders so the worksheet picks up its
+  // .worksheet--annotate class and the overlay starts capturing taps.
+  const annotateBtn = document.getElementById('toggle-annotate');
+  annotateBtn.addEventListener('click', () => {
+    annotateMode = !annotateMode;
+    annotateBtn.classList.toggle('btn--active', annotateMode);
+    if (annotateMode && pencilEnabled) {
+      // Drop pen mode silently — the kid asked for typing, the explicit
+      // toggle is more recent intent than the still-active pen state.
+      setPencilEnabled(false);
+    }
+    setKeypadCollapsed(annotateMode);
+    renderBlocks();
+  });
 
   // Section pager (centered above the page in split mode). Each arrow
   // moves both the worksheet AND its paired workblock together, so the
@@ -384,14 +414,24 @@ export async function mountEditor(root, notebookId) {
   // is the single biggest win in split view.
   const penToolsEl = document.getElementById('pen-tools');
   const penToggleBtn = document.getElementById('toggle-pen');
-  penToggleBtn.addEventListener('click', () => {
-    pencilEnabled = !pencilEnabled;
+  function setPencilEnabled(on) {
+    pencilEnabled = on;
     penToggleBtn.classList.toggle('btn--active', pencilEnabled);
     penToolsEl.hidden = !pencilEnabled;
-    canvas.classList.toggle('pencil-canvas--active', pencilEnabled);
+    if (canvas) canvas.classList.toggle('pencil-canvas--active', pencilEnabled);
     setKeypadCollapsed(pencilEnabled);
+    // Mutex with annotate mode — the pencil canvas captures pointer events
+    // for the whole page while active, so annotation taps wouldn't reach
+    // their overlay. Drop annotate when pen comes on, and re-render so the
+    // worksheet sheds its .worksheet--annotate class.
+    if (pencilEnabled && annotateMode) {
+      annotateMode = false;
+      annotateBtn.classList.remove('btn--active');
+      renderBlocks();
+    }
     requestAnimationFrame(() => resizeAndReplay());
-  });
+  }
+  penToggleBtn.addEventListener('click', () => setPencilEnabled(!pencilEnabled));
 
   document.getElementById('toggle-eraser').addEventListener('click', (e) => {
     eraserMode = !eraserMode;
@@ -613,7 +653,11 @@ export async function mountEditor(root, notebookId) {
       let el = null;
       if (block.type === BLOCK.WORKSHEET) {
         el = await renderWorksheetBlock(block, {
-          onDelete: (id) => removeBlock(id)
+          onDelete: (id) => removeBlock(id),
+          annotateMode,
+          onCreateAnnotation: createAnnotation,
+          onAnnotationChanged: (_blockId) => queueSave(),
+          onDeleteAnnotation: deleteAnnotation
         });
       } else if (block.type === BLOCK.WORK) {
         // Only the active work block carries a cursor — without this every
@@ -1027,6 +1071,44 @@ export async function mountEditor(root, notebookId) {
 
   function removeDropIndicator() {
     pageHost.querySelectorAll('.block-drop-indicator').forEach((n) => n.remove());
+  }
+
+  // ---------- worksheet annotations ----------
+
+  // Drop a new typed-text annotation at (xFrac, yFrac), then re-render so
+  // the new element exists in the DOM and the kid can focus it to start
+  // typing. Position is stored as 0..1 fractions of the rendered overlay,
+  // so the annotation stays anchored at any display size or zoom.
+  async function createAnnotation(blockId, xFrac, yFrac) {
+    const block = page.blocks.find((b) => b.id === blockId);
+    if (!block || block.type !== BLOCK.WORKSHEET) return;
+    pushUndo();
+    if (!Array.isArray(block.annotations)) block.annotations = [];
+    // Default width is generous (~22% of image width). The annotation
+    // shrinks naturally as text fills it — there's no max width — but
+    // starting wide lets short answers sit on one line.
+    const annot = newAnnotation({ x: xFrac, y: yFrac, w: 0.22 });
+    block.annotations.push(annot);
+    queueSave();
+    await renderBlocks();
+    // Focus the freshly-placed annotation so the kid can immediately type.
+    // Defer to next frame so the contenteditable is wired up by the
+    // render pass before we move the caret into it.
+    requestAnimationFrame(() => {
+      const el = pageHost.querySelector(`[data-annot-id="${annot.id}"]`);
+      if (el) el.focus();
+    });
+  }
+
+  async function deleteAnnotation(blockId, annotId) {
+    const block = page.blocks.find((b) => b.id === blockId);
+    if (!block || !Array.isArray(block.annotations)) return;
+    const idx = block.annotations.findIndex((a) => a.id === annotId);
+    if (idx < 0) return;
+    pushUndo();
+    block.annotations.splice(idx, 1);
+    queueSave();
+    await renderBlocks();
   }
 
   // ---------- worksheet add / remove ----------
