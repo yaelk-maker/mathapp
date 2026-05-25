@@ -208,7 +208,7 @@ export async function mountEditor(root, notebookId) {
         <div class="editor__actions">
           <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↺ <span class="label">ביטול</span></button>
           <span class="editor__sep"></span>
-          <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת תמונה" title="צילום או בחירת תמונה">📷 <span class="label">תמונה</span></button>
+          <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת קובץ" title="צילום, תמונה או PDF">📷 <span class="label">דף</span></button>
           <button class="btn btn--ghost" id="toggle-annotate" aria-label="כתיבה על דף" title="כתיבה על דף">📝 <span class="label">כתיבה על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
@@ -1114,31 +1114,47 @@ export async function mountEditor(root, notebookId) {
   // ---------- worksheet add / remove ----------
 
   async function addWorksheet({ capture }) {
-    const ws = await uploadWorksheet({ capture });
-    if (!ws) return;
+    // uploadWorksheet returns an array: one block for an image, or N
+    // blocks for an N-page PDF (each page rendered to its own PNG).
+    const newWs = await uploadWorksheet({ capture });
+    if (!newWs || newWs.length === 0) return;
     pushUndo();
     const hasExistingWorksheet = page.blocks.some(
       (b) => b.type === BLOCK.WORKSHEET
     );
+
+    // Insert each uploaded page. The first new worksheet follows the
+    // existing pairing rules (slot in front of the implicit first work
+    // block, or append a new paired section); subsequent pages always
+    // append as their own paired section so a PDF expands into one
+    // worksheet+workblock pair per page.
+    const firstNewWs = newWs[0];
+    const restOfNewWs = newWs.slice(1);
+
     if (!hasExistingWorksheet) {
       // First worksheet on the page — insert it ahead of the implicit
       // first work block so the kid's existing work area is paired with
       // the new worksheet image.
       const workIndex = page.blocks.findIndex((b) => b.type === BLOCK.WORK);
-      if (workIndex < 0) page.blocks.push(ws);
-      else page.blocks.splice(workIndex, 0, ws);
+      if (workIndex < 0) page.blocks.push(firstNewWs);
+      else page.blocks.splice(workIndex, 0, firstNewWs);
     } else {
       // Subsequent uploads each become their own paired section: append
       // the new worksheet AND a fresh work block right after it. Without
       // this the kid uploads a second page but has no place to solve it.
+      page.blocks.push(firstNewWs);
+      page.blocks.push(newWorkBlock());
+    }
+    for (const ws of restOfNewWs) {
       page.blocks.push(ws);
       page.blocks.push(newWorkBlock());
     }
-    // Activate the new section so split view jumps to the new worksheet
-    // immediately and renderBlocks doesn't have to derive it from the
-    // previous activeWorkBlock.
+
+    // Activate the FIRST new section so split view jumps to it immediately
+    // — for a multi-page PDF, the kid lands on page 1 and uses the pager
+    // to walk forward.
     const sections = computeSections();
-    activeSectionIndex = sections.findIndex((s) => s.includes(ws));
+    activeSectionIndex = sections.findIndex((s) => s.includes(firstNewWs));
     if (activeSectionIndex < 0) activeSectionIndex = 0;
     const newWb = (sections[activeSectionIndex] || []).find(
       (b) => b.type === BLOCK.WORK

@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v38';
+const CACHE = 'mathapp-shell-v39';
 const SHELL = [
   './',
   './index.html',
@@ -21,6 +21,10 @@ const SHELL = [
   './js/ui/dialog.js',
   './js/ui/system-keyboard.js',
   './vendor/idb.js',
+  // pdf.js — used lazily by js/io/import.js when the kid uploads a PDF.
+  // Precaching the worker too so PDF import works fully offline.
+  './vendor/pdf.min.mjs',
+  './vendor/pdf.worker.min.mjs',
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
