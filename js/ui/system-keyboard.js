@@ -16,6 +16,15 @@ let installed = false;
 
 function isFocusableInput(target) {
   if (!target) return false;
+  // contenteditable elements (e.g. worksheet annotations) also raise the
+  // iPadOS keyboard, so they need the same treatment — without this the
+  // in-app math keypad sits on top of the system keyboard with both
+  // visible. The .dialog skip below still applies since dialogs anchor
+  // themselves.
+  if (target.isContentEditable) {
+    if (target.closest && target.closest('.dialog')) return false;
+    return true;
+  }
   const tag = target.tagName;
   if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false;
   if (target.type === 'hidden' || target.disabled || target.readOnly) return false;
