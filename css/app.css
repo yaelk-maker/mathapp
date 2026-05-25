@@ -11,6 +11,16 @@
   --danger: #c0392b;
 }
 
+/* Honor iPadOS Display & Brightness → Larger Text. Setting html
+   font-size to 100% (=16px by default) lets a kid bump base size from
+   the OS slider; all button/keypad sizes downstream that use rem will
+   scale proportionally. Body keeps an effective base of 1.125rem
+   (=18px at default OS settings) so the existing visual rhythm is
+   unchanged for a kid on default settings. */
+html {
+  font-size: 100%;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -22,7 +32,7 @@ body {
   font-family: -apple-system, "SF Hebrew", "Helvetica Neue", "Arial", sans-serif;
   background: var(--bg);
   color: var(--fg);
-  font-size: 18px;
+  font-size: 1.125rem;
   -webkit-text-size-adjust: 100%;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -31,6 +41,37 @@ body {
      (.screen, .editor__page) scroll inside their own bounds, so the iPad
      keypad never gets pushed below the visible area. */
   overflow: hidden;
+}
+
+/* Reduced motion — honor the OS-level "Reduce Motion" toggle for kids
+   with vestibular sensitivity or attention-related fatigue. Cuts the
+   resize pulse, drop-indicator pulse, card-press scale, keypad longpress
+   flash, and any other ambient animation to near-zero. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Visible focus indicator for keyboard / Switch-Control users. The
+   accent color matches the active-toggle state so it doesn't look
+   foreign. We use :focus-visible so taps with a finger/pen don't
+   leave persistent rings everywhere. */
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Suppress the ring on contenteditable elements — the caret + selection
+   highlight already indicates focus, and the outline overlaps the
+   worksheet image awkwardly. */
+.worksheet__annot:focus-visible,
+.annot-frac-num:focus-visible,
+.annot-frac-den:focus-visible {
+  outline: none;
 }
 
 #app {
@@ -56,7 +97,7 @@ body {
 }
 
 h1 {
-  font-size: 32px;
+  font-size: 2rem;
   margin: 12px 0 24px;
   font-weight: 700;
 }
@@ -75,7 +116,7 @@ h1 {
   border: none;
   background: var(--accent);
   color: white;
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -116,7 +157,7 @@ h1 {
 }
 .folder-card:active { transform: scale(0.99); }
 .folder-card__icon {
-  font-size: 28px;
+  font-size: 1.75rem;
   margin-inline-end: 12px;
 }
 .folder-card__main {
@@ -125,12 +166,12 @@ h1 {
 }
 .folder-card__name {
   font-weight: 600;
-  font-size: 18px;
+  font-size: 1.125rem;
   margin-bottom: 4px;
 }
 .folder-card__meta {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .notebook-card {
@@ -152,12 +193,12 @@ h1 {
 }
 .notebook-card__name {
   font-weight: 600;
-  font-size: 18px;
+  font-size: 1.125rem;
   margin-bottom: 4px;
 }
 .notebook-card__meta {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .notebook-card__action,
@@ -175,7 +216,7 @@ h1 {
 }
 .notebook-card__action {
   color: var(--accent);
-  font-size: 20px;
+  font-size: 1.25rem;
 }
 .notebook-card__action:active { background: rgba(11, 108, 242, 0.1); }
 /* Delete sits behind a long-press affordance (see js/main.js). The button is
@@ -183,7 +224,7 @@ h1 {
    are unlikely; activation requires a held press. */
 .notebook-card__delete {
   color: var(--danger);
-  font-size: 22px;
+  font-size: 1.375rem;
   margin-inline-start: 6px;
   opacity: 0.55;
   position: relative;
@@ -210,7 +251,7 @@ h1 {
 .search-input {
   width: 100%;
   padding: 12px 14px;
-  font-size: 16px;
+  font-size: 1rem;
   font-family: inherit;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -240,7 +281,7 @@ h1 {
    inactive, with the day counter on the right (RTL start) of the meta line. */
 .trash-hint {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 0.875rem;
   margin: 0 0 16px;
 }
 .notebook-card--trash {
@@ -275,13 +316,13 @@ h1 {
   color: var(--accent);
   padding: 8px 14px;
   border-radius: 10px;
-  font-size: 16px;
+  font-size: 1rem;
   cursor: pointer;
   font-family: inherit;
 }
 .editor__back:active { background: rgba(11, 108, 242, 0.08); }
 .editor__title {
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 700;
   margin: 0;
   flex: 1;
@@ -354,7 +395,7 @@ h1 {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.92);
   color: var(--accent);
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
@@ -381,7 +422,7 @@ h1 {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1;
   cursor: pointer;
   display: flex;
@@ -401,7 +442,7 @@ h1 {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  font-size: 16px;
+  font-size: 1rem;
   line-height: 1;
   cursor: pointer;
   display: flex;
@@ -428,7 +469,7 @@ h1 {
   flex-wrap: wrap;
   align-items: center;
 }
-.editor__actions .btn { font-size: 14px; padding: 8px 12px; flex: 0 0 auto; }
+.editor__actions .btn { font-size: 0.875rem; padding: 8px 12px; flex: 0 0 auto; }
 .editor__sep {
   width: 1px;
   height: 28px;
@@ -445,7 +486,7 @@ h1 {
    wouldn't fit all eleven labeled buttons on one line. */
 @media (max-width: 1200px) {
   .editor__actions .btn .label { display: none; }
-  .editor__actions .btn { font-size: 18px; padding: 8px 10px; }
+  .editor__actions .btn { font-size: 1.125rem; padding: 8px 10px; }
 }
 .btn--active {
   background: var(--accent);
@@ -511,7 +552,7 @@ h1 {
   z-index: 6;
   background: var(--accent);
   color: white;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   padding: 4px 12px;
   border-radius: 999px;
@@ -627,7 +668,7 @@ h1 {
   right: 8px;
   width: 22px;
   height: 22px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
 }
 .editor--split .worksheet > .block__handle {
@@ -688,7 +729,7 @@ h1 {
   inset-inline-end: 4px;
   background: rgba(0, 0, 0, 0.55);
   color: white;
-  font-size: 14px;
+  font-size: 0.875rem;
   border-radius: 50%;
   width: 22px;
   height: 22px;
@@ -734,7 +775,7 @@ h1 {
   border: none;
   background: rgba(0, 0, 0, 0.55);
   color: white;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
   display: flex;
@@ -854,33 +895,42 @@ h1 {
 
 .worksheet__annot-chrome {
   position: absolute;
-  /* Default position: above the annotation. RTL-friendly because the
-     buttons inside lay out LTR (A-, A+, 🗑, ✓) regardless of doc dir. */
+  /* Default position: above the annotation. The buildManipulateChrome
+     code in worksheet.js flips this to below by adding the
+     --flip-below class when the annotation is too close to the top of
+     the visible area, so the chrome never goes off-screen. */
   bottom: calc(100% + 6px);
   right: 0;
   display: flex;
   gap: 4px;
   background: #111;
   color: white;
-  padding: 4px;
-  border-radius: 6px;
+  padding: 6px;
+  border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   /* Chrome sits in its own font world so cqh-sized annotation text doesn't
      resize the buttons. */
-  font-size: 13px;
+  font-size: 0.875rem;
   font-family: inherit;
   direction: ltr;
   z-index: 2;
+}
+.worksheet__annot-chrome--flip-below {
+  bottom: auto;
+  top: calc(100% + 6px);
 }
 .worksheet__annot-btn {
   border: none;
   background: transparent;
   color: white;
-  min-width: 32px;
-  height: 28px;
-  padding: 0 6px;
+  /* 44×44 is the Apple HIG minimum tap target and the published
+     baseline for users with reduced fine-motor control. Bumped from
+     32×28 — chrome is short-lived so it can afford the chunk. */
+  min-width: 44px;
+  height: 44px;
+  padding: 0 8px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -888,22 +938,96 @@ h1 {
 .worksheet__annot-btn:active { background: rgba(255, 255, 255, 0.18); }
 
 .worksheet__annot-resize {
+  /* 44×44 hit area for a kid with reduced fine-motor control. The blue
+     dot inside is rendered via ::before so the visible affordance stays
+     16px — the rest of the box is transparent tap surface. */
   position: absolute;
-  bottom: -8px;
+  bottom: -22px;
   /* RTL caveat: the worksheet figure inherits dir=rtl from <html>; we want
-     the resize handle on the visual right edge regardless, so use
-     `inset-inline-end: auto` and pin to physical right. */
-  right: -8px;
+     the resize handle on the visual right edge regardless, so pin
+     physical right. */
+  right: -22px;
   left: auto;
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: none;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.worksheet__annot-resize::before {
+  content: '';
+  display: block;
   width: 16px;
   height: 16px;
   background: var(--accent);
   border: 2px solid white;
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-  cursor: ew-resize;
-  touch-action: none;
-  z-index: 2;
+}
+
+/* "+" floating target that appears after the first tap in annotate mode.
+   The kid taps it again (or any nearby spot within 500ms) to confirm
+   creation — accessibility audit said single-tap-create accumulates
+   ghost annotations on every tremor. */
+.worksheet__annot-pending {
+  position: absolute;
+  /* Anchor the visual center at the tapped point. */
+  transform: translate(50%, -50%);
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: white;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+  z-index: 3;
+  cursor: pointer;
+  animation: annotPendingPulse 1.4s ease-in-out infinite;
+}
+@keyframes annotPendingPulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(11, 108, 242, 0.5); transform: translate(50%, -50%) scale(1); }
+  50%      { box-shadow: 0 2px 14px rgba(11, 108, 242, 0.7); transform: translate(50%, -50%) scale(1.08); }
+}
+
+/* Tap-only "manipulate" badge — appears on the focused annotation so a
+   kid who can't reliably long-press can still enter move/resize/font
+   mode. Long-press remains as a power-user shortcut. Lives in the
+   overlay (sibling of the annotation), positioned via inline left/top
+   set from the annotation's fractional coordinates. */
+.worksheet__annot-manipulate-badge {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: white;
+  border: 2px solid white;
+  border-radius: 50%;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  z-index: 3;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
+}
+.worksheet__annot-manipulate-badge:active {
+  background: var(--accent-pressed);
 }
 
 /* Section pager bar — sits above the page area, centered. Only visible
@@ -926,18 +1050,22 @@ h1 {
 }
 .editor__section-btn {
   appearance: none;
-  width: 44px;
-  height: 36px;
+  /* 44×44 to clear Apple HIG and the motor-impairment 7-9mm minimum.
+     Was 44×36. The bar wraps Hebrew labels (קודם / הבא) instead of
+     ‹›, which were visually ambiguous against RTL page flow and tiny
+     even for users without motor issues. */
+  min-width: 56px;
+  height: 44px;
   border: 1px solid var(--border);
   background: white;
   color: var(--accent);
   border-radius: 10px;
-  font-size: 22px;
+  font-size: 1rem;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  padding: 0;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -947,7 +1075,7 @@ h1 {
   background: rgba(11, 108, 242, 0.1);
 }
 .editor__section-count {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--fg);
@@ -975,7 +1103,7 @@ h1 {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.92);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1;
   cursor: pointer;
   padding: 0;
@@ -999,7 +1127,7 @@ h1 {
   border: 1px solid var(--accent);
   background: rgba(255, 255, 255, 0.95);
   color: var(--accent);
-  font-size: 22px;
+  font-size: 1.375rem;
   line-height: 1;
   cursor: pointer;
   padding: 0;
@@ -1166,7 +1294,7 @@ h1 {
   border: 1px solid var(--border);
   background: white;
   color: var(--accent);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   padding: 8px 12px;
   border-radius: 8px;
@@ -1397,7 +1525,7 @@ h1 {
   flex: 1 1 0;
   min-width: 44px;
   min-height: 44px;
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 600;
   font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
   background: white;
@@ -1441,7 +1569,7 @@ h1 {
 .keypad__key--nav {
   background: #f5f5f5;
   color: #555;
-  font-size: 20px;
+  font-size: 1.25rem;
 }
 
 .keypad__key--edit {
@@ -1469,7 +1597,7 @@ h1 {
 .keypad__mode-top,
 .keypad__mode-bot {
   display: block;
-  font-size: 14px;
+  font-size: 0.875rem;
   letter-spacing: 0.04em;
 }
 .keypad__mode-top {
@@ -1482,7 +1610,7 @@ h1 {
 .keypad__key--space {
   background: white;
   color: #555;
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 500;
 }
 
@@ -1499,11 +1627,15 @@ h1 {
    centered; the alt sits as a tiny superscript in the corner. */
 .keypad__key .keypad__longpress {
   position: absolute;
-  top: 3px;
-  inset-inline-end: 4px;
-  font-size: 10px;
-  opacity: 0.55;
-  font-weight: 600;
+  top: 4px;
+  inset-inline-end: 5px;
+  /* Was 10px / 0.55 opacity / muted — invisible to a 7th grader. Bumped
+     to 14px / 0.9 / accent so the kid actually discovers ≤ ≥ via the
+     hint glyph rather than having to be told the long-press trick. */
+  font-size: 0.875rem;
+  opacity: 0.9;
+  color: var(--accent);
+  font-weight: 700;
   pointer-events: none;
   line-height: 1;
 }
@@ -1527,7 +1659,7 @@ h1 {
   align-items: center;
   font-style: italic;
   line-height: 1;
-  font-size: 18px;
+  font-size: 1.125rem;
 }
 .keypad__frac-num,
 .keypad__frac-den {
@@ -1562,7 +1694,7 @@ h1 {
   border: none;
   background: rgba(0, 0, 0, 0.55);
   color: white;
-  font-size: 18px;
+  font-size: 1.125rem;
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
@@ -1573,8 +1705,28 @@ h1 {
   justify-content: center;
   padding: 0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  /* Required for the longpress-fill ::before to be clipped to the
+     button's circular bounds. */
+  overflow: hidden;
 }
 .workblock__delete:active { background: rgba(192, 57, 43, 0.85); }
+/* Long-press progress fill — visual feedback during the 700ms hold so
+   the kid sees the action is loading. Same idea as
+   .notebook-card__delete .longpress-fill but tinted red since this
+   button is already on a dark background. */
+.workblock__delete .longpress-fill {
+  position: absolute;
+  inset: 0;
+  background: rgba(192, 57, 43, 0.55);
+  transform: scaleX(0);
+  transform-origin: center;
+  pointer-events: none;
+  border-radius: 50%;
+}
+.workblock__delete--arming .longpress-fill {
+  transform: scaleX(1);
+  transition: transform 700ms linear;
+}
 
 /* --- Work block resize handle --- */
 /* Sits at the bottom-right of the work block. Drag down/right to grow,
@@ -1590,7 +1742,7 @@ h1 {
   border: 1px solid var(--accent);
   background: white;
   color: var(--accent);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 700;
   line-height: 1;
   cursor: nwse-resize;
@@ -1630,14 +1782,17 @@ h1 {
   position: absolute;
   top: -10px;
   right: 18px;
-  font-size: 11px;
+  /* Bumped from 11px / #666 (≈3:1 on white — fails WCAG AA for text) to
+     13px / #444 (≈8.7:1 — passes AAA). The chip is small enough that
+     contrast is the difference between readable and squint-only. */
+  font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1;
-  padding: 3px 8px;
+  padding: 4px 9px;
   border-radius: 9px;
   background: white;
-  color: var(--muted, #666);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #444;
+  border: 1px solid rgba(0, 0, 0, 0.15);
   pointer-events: none;
   z-index: 4;
   font-variant-numeric: tabular-nums;
@@ -1674,7 +1829,7 @@ h1 {
   background: rgba(0, 0, 0, 0.4);
 }
 .crop-overlay__title {
-  font-size: 18px;
+  font-size: 1.125rem;
   font-weight: 600;
 }
 .crop-overlay__bar--bottom { gap: 12px; flex-wrap: wrap; }
@@ -1749,31 +1904,60 @@ h1 {
   position: absolute;
   /* Float the handle slightly above the block edge so it never overlaps
      the worksheet image or the first row of grid cells. */
-  top: -12px;
+  top: -22px;
   /* Physical left across all block types — the delete button sits on the
      right of worksheets/textboxes, so the left side is always free. */
   left: 8px;
   z-index: 4;
-  width: 28px;
-  height: 18px;
-  border-radius: 6px;
+  /* 44×44 minimum tap target. Previously 28×18 — well below Apple HIG
+     and a natural finger-on-page-scroll target that would trigger
+     accidental drags. */
+  min-width: 44px;
+  height: 44px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: white;
-  color: #888;
-  font-size: 14px;
+  color: #555;
+  font-size: 1rem;
   line-height: 1;
   font-weight: 700;
   cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  padding: 0 4px;
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  gap: 2px;
 }
 .block__handle:hover { color: var(--accent); border-color: var(--accent); }
 .block__handle:active { cursor: grabbing; background: #eaf1ff; }
+/* Up/Down arrow buttons next to the drag dots — give a tap-only path
+   for reordering blocks (the drag remains for kids who can manage it). */
+.block__handle-arrow {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1;
+  width: 22px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.block__handle-arrow:active { background: #eaf1ff; }
+.block__handle-arrow[disabled] {
+  color: #bbb;
+  cursor: default;
+}
 
 /* Work blocks reserve a padded strip above the grid (see .workblock
    padding-top); position the handle inside that strip so it never overlaps
@@ -1830,7 +2014,7 @@ h1 {
   outline: none;
   background: transparent;
   padding: 12px 40px 12px 14px; /* leave room for the drag handle */
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1.5;
   font-family: inherit;
   color: var(--fg);
@@ -1852,7 +2036,7 @@ h1 {
   border: none;
   background: rgba(0, 0, 0, 0.45);
   color: white;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -1863,7 +2047,7 @@ h1 {
 
 .keypad--hebrew .keypad__key {
   font-family: -apple-system, "SF Hebrew", "Helvetica Neue", "Arial", sans-serif;
-  font-size: 20px;
+  font-size: 1.25rem;
 }
 
 /* iPadOS PWA standalone polish */
@@ -1990,13 +2174,13 @@ body.system-kbd-up .editor__keypad-host {
   text-align: start;
 }
 .dialog__title {
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 700;
   margin: 0 0 8px;
   line-height: 1.3;
 }
 .dialog__body {
-  font-size: 16px;
+  font-size: 1rem;
   line-height: 1.5;
   margin-bottom: 16px;
   color: #333;
@@ -2004,7 +2188,7 @@ body.system-kbd-up .editor__keypad-host {
 .dialog__input {
   width: 100%;
   padding: 12px 14px;
-  font-size: 18px;
+  font-size: 1.125rem;
   font-family: inherit;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2034,7 +2218,7 @@ body.system-kbd-up .editor__keypad-host {
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--fg);
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
@@ -2068,7 +2252,7 @@ body.system-kbd-up .editor__keypad-host {
   appearance: none;
   text-align: start;
   font-family: inherit;
-  font-size: 17px;
+  font-size: 1.0625rem;
   padding: 14px 16px;
   border-radius: 10px;
   border: 1.5px solid var(--border);
@@ -2100,14 +2284,14 @@ body.system-kbd-up .editor__keypad-host {
 }
 .keypad--english .keypad__key {
   font-family: -apple-system, "Helvetica Neue", "Arial", sans-serif;
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 500;
   text-transform: none;
 }
 .keypad__key--shift {
   color: var(--accent);
   background: #f7faff;
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 700;
 }
 .keypad__key--shift:active { background: #cfdcfb; }

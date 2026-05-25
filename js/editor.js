@@ -266,12 +266,16 @@ export async function mountEditor(root, notebookId) {
           </span>
         </div>
       </div>
-      <div class="editor__section-bar" id="section-bar" hidden dir="ltr">
+      <div class="editor__section-bar" id="section-bar" hidden dir="rtl">
+        <!-- dir="rtl" places "previous" (קודם) visually on the right and
+             "next" (הבא) on the left, matching Hebrew page flow. Labels
+             are Hebrew text rather than ‹›, which were tiny and
+             directionally ambiguous on RTL pages. -->
         <button type="button" class="editor__section-btn" data-dir="prev"
-                aria-label="עמוד קודם" title="עמוד קודם">‹</button>
+                aria-label="עמוד קודם" title="עמוד קודם">קודם</button>
         <span class="editor__section-count" id="section-count">1 / 1</span>
         <button type="button" class="editor__section-btn" data-dir="next"
-                aria-label="עמוד הבא" title="עמוד הבא">›</button>
+                aria-label="עמוד הבא" title="עמוד הבא">הבא</button>
       </div>
       <div class="editor__page" id="page-scroll">
         <div class="pen-mode-indicator">✏️ מצב ציור פעיל</div>
@@ -462,6 +466,29 @@ export async function mountEditor(root, notebookId) {
     requestAnimationFrame(() => resizeAndReplay());
   }
   penToggleBtn.addEventListener('click', () => setPencilEnabled(!pencilEnabled));
+
+  // Auto-detect Apple Pencil hover/touch. iPadOS 14+ fires pointer events
+  // with pointerType="pen" both when the Pencil is hovering ~2 cm above
+  // the screen AND when it touches down. Either signal means the kid is
+  // intending to draw, so flip pen mode on automatically — without this
+  // she has to manually toggle ✏️ every time she picks up the Pencil,
+  // which the accessibility audit flagged as needless mode-juggling
+  // for a kid with motor impairment. We DON'T auto-disable; the kid
+  // taps ✏️ off when she's done drawing, so a stray Pencil rest near
+  // the screen doesn't lock her out of typing.
+  document.addEventListener('pointerover', (e) => {
+    if (e.pointerType === 'pen' && !pencilEnabled) {
+      setPencilEnabled(true);
+    }
+  }, true);
+  // Pencil 1st-gen on older iPads may not fire pointerover hover events
+  // reliably. Cover the case where the first signal is a touchdown by
+  // also flipping on pointerdown.
+  document.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'pen' && !pencilEnabled) {
+      setPencilEnabled(true);
+    }
+  }, true);
 
   document.getElementById('toggle-eraser').addEventListener('click', (e) => {
     eraserMode = !eraserMode;
@@ -868,18 +895,78 @@ export async function mountEditor(root, notebookId) {
   // so the canvas's pointer-events: auto doesn't fight the handle.
   function attachBlockDragHandle(el, block) {
     el.classList.add('block');
-    const handle = document.createElement('button');
-    handle.type = 'button';
+    const handle = document.createElement('div');
     handle.className = 'block__handle';
-    handle.title = 'גרור כדי לסדר מחדש';
-    handle.setAttribute('aria-label', 'גרור כדי לסדר מחדש');
-    handle.textContent = '⋮⋮';
-    // Don't let the handle steal focus from a textarea/cell.
-    handle.addEventListener('mousedown', (e) => e.preventDefault());
-    handle.addEventListener('pointerdown', (e) => {
+    handle.title = 'סידור מחדש';
+    handle.setAttribute('role', 'group');
+    handle.setAttribute('aria-label', 'סדר את הבלוק');
+
+    // Tap-only path: up/down arrows shift the block one slot at a time
+    // without requiring a sustained drag. Accessibility audit flagged
+    // drag-only reorder as a major motor-impairment issue. Drag still
+    // works for kids who can manage it (it's wired on the dots).
+    const idx = () => page.blocks.indexOf(block);
+    const canMoveUp = () => idx() > 0;
+    const canMoveDown = () => idx() >= 0 && idx() < page.blocks.length - 1;
+
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'block__handle-arrow';
+    upBtn.textContent = '▲';
+    upBtn.title = 'הזיזי למעלה';
+    upBtn.setAttribute('aria-label', 'הזיזי למעלה');
+
+    const dots = document.createElement('span');
+    dots.className = 'block__handle-dots';
+    dots.textContent = '⋮⋮';
+    dots.style.cursor = 'grab';
+    dots.style.padding = '0 4px';
+
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button';
+    downBtn.className = 'block__handle-arrow';
+    downBtn.textContent = '▼';
+    downBtn.title = 'הזיזי למטה';
+    downBtn.setAttribute('aria-label', 'הזיזי למטה');
+
+    const refreshDisabled = () => {
+      upBtn.disabled = !canMoveUp();
+      downBtn.disabled = !canMoveDown();
+    };
+    refreshDisabled();
+
+    const move = async (delta) => {
+      const i = idx();
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= page.blocks.length) return;
+      pushUndo();
+      const [moved] = page.blocks.splice(i, 1);
+      page.blocks.splice(j, 0, moved);
+      await savePage(page);
+      await renderBlocks();
+    };
+    upBtn.addEventListener('click', (e) => { e.stopPropagation(); move(-1); });
+    downBtn.addEventListener('click', (e) => { e.stopPropagation(); move(+1); });
+    // mousedown preventDefault on the buttons so they don't steal focus
+    // from the active work-block cell.
+    upBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    downBtn.addEventListener('mousedown', (e) => e.preventDefault());
+
+    // Drag-to-reorder remains, anchored on the central ⋮⋮ dots only —
+    // not the whole handle area — so the up/down arrows can be tapped
+    // without arming a drag.
+    dots.addEventListener('mousedown', (e) => e.preventDefault());
+    dots.addEventListener('pointerdown', (e) => {
       if (pencilEnabled) return;
-      startBlockDrag(e, el, block, handle);
+      // Pass `dots` (the actual event target) as the captureEl so
+      // setPointerCapture works correctly — the parent handle div is a
+      // container, not the element under the kid's finger.
+      startBlockDrag(e, el, block, dots);
     });
+
+    handle.appendChild(upBtn);
+    handle.appendChild(dots);
+    handle.appendChild(downBtn);
     el.appendChild(handle);
   }
 
@@ -2656,6 +2743,25 @@ export async function mountEditor(root, notebookId) {
     pendingPageSaves.add(p);
     p.finally(() => pendingPageSaves.delete(p));
   }
+
+  // Flush in-flight saves whenever the OS is about to swap the tab out
+  // or unload the page. Without these listeners a 300ms debounce window
+  // mid-typing could lose the most recent characters if the kid rotates
+  // the iPad, swipes to the home screen, or closes the PWA — iPadOS
+  // pauses the WebKit JIT on `visibilitychange → hidden` and may not
+  // resume before the page is torn down.
+  function flushOnLifecycle() {
+    // Best-effort: kick the debounced save AND wait for any in-flight
+    // IDB transaction to commit. We can't actually block the unload, so
+    // the awaited promise mostly just gives the IDB write a chance to
+    // settle before the JIT pauses.
+    try { flushSave(); } catch (_) {}
+  }
+  window.addEventListener('beforeunload', flushOnLifecycle);
+  window.addEventListener('pagehide', flushOnLifecycle);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushOnLifecycle();
+  });
 }
 
 function clamp(n, lo, hi) {

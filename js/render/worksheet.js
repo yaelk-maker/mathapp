@@ -165,6 +165,54 @@ function bindAnnotationInteractions(el, annot, block, options) {
   // gesture-initiated transition into manipulate mode.
   let enteringManipulate = false;
 
+  // ----- tap-only path into manipulate mode -----
+  // The long-press is preserved for power users, but a kid with reduced
+  // fine-motor control needs a discoverable single-tap alternative.
+  // Show a small "⋯" badge above the annotation whenever it gains
+  // focus; tap the badge to enter the same manipulate UI that long-
+  // press provides (drag to move, resize handle, A−/A+/🗑/✓ chrome).
+  //
+  // The badge lives in the OVERLAY (sibling of the annotation), not
+  // inside the annotation itself — otherwise its "⋯" glyph would leak
+  // into el.textContent and be saved as part of annot.text.
+  let manipulateBadge = null;
+  const removeManipulateBadge = () => {
+    if (manipulateBadge) { manipulateBadge.remove(); manipulateBadge = null; }
+  };
+  el.addEventListener('focus', () => {
+    if (el.classList.contains('worksheet__annot--manipulate')) return;
+    removeManipulateBadge();
+    const overlay = el.closest('.worksheet__overlay');
+    if (!overlay) return;
+    manipulateBadge = document.createElement('button');
+    manipulateBadge.type = 'button';
+    manipulateBadge.className = 'worksheet__annot-manipulate-badge';
+    manipulateBadge.textContent = '⋯';
+    manipulateBadge.title = 'הזיזי / שני גודל / מחקי';
+    manipulateBadge.setAttribute('aria-label', 'אפשרויות (הזזה, שינוי גודל, מחיקה)');
+    // Position the badge in the overlay using the annotation's stored
+    // fractional coordinates. Top is the annotation's top minus an
+    // offset for the badge itself (it floats above).
+    manipulateBadge.style.left = `${(annot.x * 100).toFixed(3)}%`;
+    manipulateBadge.style.top = `calc(${(annot.y * 100).toFixed(3)}% - 50px)`;
+    manipulateBadge.addEventListener('mousedown', (e) => e.preventDefault());
+    manipulateBadge.addEventListener('pointerdown', (e) => e.stopPropagation());
+    manipulateBadge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      el.blur();
+      enteringManipulate = true;
+      removeManipulateBadge();
+      enterManipulateMode(el, annot, block, options);
+    });
+    overlay.appendChild(manipulateBadge);
+  }, true);
+  el.addEventListener('blur', () => {
+    // Delay removal so the badge's own click handler can fire — without
+    // this, tapping the badge blurs the annotation first and removes
+    // the badge before the click handler runs.
+    setTimeout(removeManipulateBadge, 100);
+  }, true);
+
   // ----- text edits -----
   // Input events bubble up from nested editable slots (fraction num/den),
   // so this single listener captures keystrokes regardless of whether the
@@ -277,6 +325,18 @@ function enterManipulateMode(el, annot, block, options) {
   const overlay = el.closest('.worksheet__overlay');
   const chrome = buildManipulateChrome(el, annot, block, options, exitManipulateMode);
   el.appendChild(chrome);
+
+  // Flip chrome below the annotation when there isn't enough room
+  // above. The chrome is ~56px tall (44px button + padding); if the
+  // annotation's top is within that distance of the viewport top, the
+  // chrome would render off-screen. Accessibility audit flagged this
+  // as a discoverability issue for annotations near the top of a
+  // worksheet — the kid couldn't reach the A−/A+/🗑/✓ controls.
+  const annotRect = el.getBoundingClientRect();
+  const CHROME_HEIGHT_PX = 60;
+  if (annotRect.top < CHROME_HEIGHT_PX) {
+    chrome.classList.add('worksheet__annot-chrome--flip-below');
+  }
 
   const handle = document.createElement('div');
   handle.className = 'worksheet__annot-resize';
@@ -435,21 +495,40 @@ function bindResize(handle, el, annot, block, overlay, options) {
 }
 
 // --- Creating annotations by tapping the overlay --------------------------
+//
+// Creation requires a DOUBLE-TAP, not a single tap. The accessibility
+// audit flagged single-tap-create as the source of "ghost annotations
+// everywhere" — a kid with tremors brushes the worksheet and gets
+// permanent placeholders. Double-tap is a deliberate gesture; single
+// taps just position a (transient) "+" indicator at the spot so the kid
+// knows where the next tap will land. The indicator also acts as the
+// "second tap" target — tapping it again confirms the creation.
+
+const DOUBLETAP_WINDOW_MS = 500;
+const DOUBLETAP_MAX_DRIFT_PX = 24;
 
 function bindCreateOnTap(overlay, block, options) {
   if (!options.onCreateAnnotation) return;
+
+  let lastTap = null; // { x, y, t } for double-tap detection
+  let indicator = null; // floating "+" element
+
+  const removeIndicator = () => {
+    if (indicator) { indicator.remove(); indicator = null; }
+  };
+
+  // pointerdown/up tracking for tap detection
   let downX = 0, downY = 0, downTime = 0, pid = null;
 
   overlay.addEventListener('pointerdown', (e) => {
     if (!overlay.closest('.worksheet').classList.contains('worksheet--annotate')) return;
-    // Ignore taps that originate on an existing annotation — those go to
-    // edit / long-press, not create.
     if (e.target.closest('.worksheet__annot')) return;
     pid = e.pointerId;
     downX = e.clientX;
     downY = e.clientY;
     downTime = performance.now();
   });
+
   overlay.addEventListener('pointerup', (e) => {
     if (e.pointerId !== pid) return;
     pid = null;
@@ -457,14 +536,63 @@ function bindCreateOnTap(overlay, block, options) {
     if (!overlay.closest('.worksheet').classList.contains('worksheet--annotate')) return;
     const dt = performance.now() - downTime;
     const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
-    // Treat as a tap only if it was short and didn't move — otherwise the
-    // kid was scrolling, and we mustn't drop an annotation under her finger.
-    if (dt > 600 || dist > LONGPRESS_SLOP_PX) return;
+    // Tap heuristic: short hold, no drift.
+    if (dt > 600 || dist > LONGPRESS_SLOP_PX) {
+      lastTap = null;
+      removeIndicator();
+      return;
+    }
+
     const rect = overlay.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
-    const x = clamp01((e.clientX - rect.left) / rect.width);
-    const y = clamp01((e.clientY - rect.top) / rect.height);
-    options.onCreateAnnotation(block.id, x, y);
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const now = performance.now();
+
+    // Second tap within the double-tap window AND near the first tap →
+    // confirm creation at the FIRST-tap position (so the kid's two taps
+    // can be slightly off without scrolling the annotation).
+    if (lastTap &&
+        now - lastTap.t <= DOUBLETAP_WINDOW_MS &&
+        Math.hypot(x - lastTap.x, y - lastTap.y) <= DOUBLETAP_MAX_DRIFT_PX) {
+      const xFrac = clamp01(lastTap.x / rect.width);
+      const yFrac = clamp01(lastTap.y / rect.height);
+      removeIndicator();
+      lastTap = null;
+      options.onCreateAnnotation(block.id, xFrac, yFrac);
+      return;
+    }
+
+    // First tap: drop a "+" indicator. Tapping it again (or anywhere
+    // close to it within DOUBLETAP_WINDOW_MS) commits the creation.
+    lastTap = { x, y, t: now };
+    removeIndicator();
+    indicator = document.createElement('div');
+    indicator.className = 'worksheet__annot-pending';
+    indicator.textContent = '＋';
+    indicator.title = 'הקישי שוב כדי להוסיף תיבת טקסט';
+    indicator.style.left = `${(x / rect.width * 100).toFixed(2)}%`;
+    indicator.style.top = `${(y / rect.height * 100).toFixed(2)}%`;
+    indicator.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    indicator.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const r = overlay.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      const xFrac = clamp01(lastTap.x / r.width);
+      const yFrac = clamp01(lastTap.y / r.height);
+      removeIndicator();
+      lastTap = null;
+      options.onCreateAnnotation(block.id, xFrac, yFrac);
+    });
+    overlay.appendChild(indicator);
+    // Auto-remove after the double-tap window expires so a forgotten
+    // pending indicator doesn't sit on the worksheet forever.
+    setTimeout(() => {
+      if (indicator && lastTap && (performance.now() - lastTap.t) >= DOUBLETAP_WINDOW_MS) {
+        removeIndicator();
+        lastTap = null;
+      }
+    }, DOUBLETAP_WINDOW_MS + 30);
   });
 }
 
