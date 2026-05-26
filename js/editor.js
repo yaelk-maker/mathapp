@@ -39,7 +39,7 @@ import {
   nextExerciseLabel,
   getAnnotations
 } from './page-model.js';
-import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
+import { renderWorkBlock, updateCell, updateCursor, paintCell } from './render/grid.js';
 import {
   renderWorksheetBlock,
   revokeWorksheetUrls,
@@ -105,8 +105,17 @@ export async function mountEditor(root, notebookId) {
   }
   const page = pages[0];
 
+  // Fresh notebook bootstrap — seed FIVE exercise blocks instead of
+  // one. Most worksheets the kid solves have several questions; pre-
+  // creating their work areas lets her start typing immediately on
+  // each one instead of pressing "+ תרגיל חדש" four extra times. Each
+  // block gets a sequential label (1..5). Old notebooks already have
+  // at least one work block, so this branch only runs for true first-
+  // loads of a freshly-created notebook.
   if (!page.blocks.some((b) => b.type === BLOCK.WORK)) {
-    page.blocks.push(newWorkBlock());
+    for (let i = 1; i <= 5; i += 1) {
+      page.blocks.push(newWorkBlock({ label: String(i) }));
+    }
     await savePage(page);
   }
 
@@ -773,7 +782,12 @@ export async function mountEditor(root, notebookId) {
         // active grid annotation belongs to THIS worksheet block —
         // otherwise the cursor would render on a grid in another section.
         const gridFocus = (activeGridAnnot && activeGridAnnot.worksheetBlockId === block.id)
-          ? { annotId: activeGridAnnot.annotId, r: activeGridAnnot.cursor.r, c: activeGridAnnot.cursor.c }
+          ? {
+              annotId: activeGridAnnot.annotId,
+              r: activeGridAnnot.cursor.r,
+              c: activeGridAnnot.cursor.c,
+              slot: activeGridAnnot.cursor.slot || null
+            }
           : null;
         el = await renderWorksheetBlock(block, {
           onDelete: (id) => removeBlock(id),
@@ -2432,7 +2446,19 @@ export async function mountEditor(root, notebookId) {
     const annot = (block.annotations || []).find((a) => a.id === activeGridAnnot.annotId);
     if (!annot || !isGridAnnotation(annot)) { activeGridAnnot = null; return; }
 
+    const cur = activeGridAnnot.cursor;
+    const cell = annot.cells && annot.cells[`${cur.r},${cur.c}`];
+
+    // Inside a composite slot (cursor entered a fraction's num/den) the
+    // dispatch is slot-local: chars append to the slot, arrows step
+    // between slots or exit, backspace clears within the slot.
+    if (cur.slot && isComposite(cell)) {
+      return handleGridAnnotSlotKey(annot, cell, code);
+    }
+
+    // Cell-level dispatch when the cursor isn't inside a slot.
     if (code === 'EXIT') { activeGridAnnot = null; renderBlocks(); return; }
+    if (code === 'FRAC') return gridAnnotInsertFraction(annot);
     if (code === 'BACKSPACE') return gridAnnotBackspace(annot);
     if (code === 'LEFT')  return gridAnnotMoveCursor(annot, 0, -1);
     if (code === 'RIGHT') return gridAnnotMoveCursor(annot, 0, +1);
@@ -2442,14 +2468,82 @@ export async function mountEditor(root, notebookId) {
     if (code === 'NEWLINE') {
       // ⏎: drop to the next row, column 0 — mirrors how the kid moves
       // between steps in a worksheet calculation.
-      const { cursor: cur } = activeGridAnnot;
       gridAnnotSetCursor(annot, Math.min(annot.rows - 1, cur.r + 1), 0);
       return;
     }
-    // Composite codes (FRAC, POW, …) and other unknowns are ignored in
-    // v1. Only single-character codes become atoms.
+    // If the cursor lands on an existing composite cell, enter its first
+    // slot before treating subsequent keys (so '5' after navigating onto
+    // a fraction lands inside the numerator instead of overwriting the
+    // composite with an atom).
+    if (isComposite(cell)) {
+      cur.slot = compositeSlots(cell)[0] || null;
+      gridAnnotRepaintCell(annot, cur.r, cur.c);
+      if (typeof code === 'string' && [...code].length === 1) {
+        return handleGridAnnotSlotKey(annot, cell, code);
+      }
+      return;
+    }
     if (typeof code === 'string' && [...code].length === 1) {
       return gridAnnotInsertChar(annot, code);
+    }
+  }
+
+  // Slot-local dispatch — used when the cursor is inside a composite
+  // cell's slot (e.g. typing into a fraction's numerator). Mirrors the
+  // work-block slot semantics (arrow up/down toggles between num/den,
+  // arrow left/right exits the composite, backspace deletes from the
+  // slot or collapses an empty composite).
+  function handleGridAnnotSlotKey(annot, cell, code) {
+    const cur = activeGridAnnot.cursor;
+    if (code === 'EXIT') {
+      cur.slot = null;
+      gridAnnotRepaintCell(annot, cur.r, cur.c);
+      return;
+    }
+    if (code === 'BACKSPACE') return gridAnnotSlotBackspace(annot, cell);
+    if (code === 'UP') {
+      if (cell.type === 'fraction' && cur.slot === 'den') {
+        cur.slot = 'num';
+        gridAnnotRepaintCell(annot, cur.r, cur.c);
+        return;
+      }
+      // Exit composite upward into the row above (or stay if at top).
+      cur.slot = null;
+      gridAnnotMoveCursor(annot, -1, 0);
+      return;
+    }
+    if (code === 'DOWN') {
+      if (cell.type === 'fraction' && cur.slot === 'num') {
+        cur.slot = 'den';
+        gridAnnotRepaintCell(annot, cur.r, cur.c);
+        return;
+      }
+      cur.slot = null;
+      gridAnnotMoveCursor(annot, +1, 0);
+      return;
+    }
+    if (code === 'LEFT') {
+      cur.slot = null;
+      gridAnnotMoveCursor(annot, 0, -1);
+      return;
+    }
+    if (code === 'RIGHT' || code === 'SPACE') {
+      cur.slot = null;
+      gridAnnotMoveCursor(annot, 0, +1);
+      return;
+    }
+    if (code === 'NEWLINE') {
+      cur.slot = null;
+      gridAnnotSetCursor(annot, Math.min(annot.rows - 1, cur.r + 1), 0);
+      return;
+    }
+    if (code === 'FRAC') {
+      // Nested fractions aren't supported in slots (string-only model);
+      // fall back silently rather than corrupting the model.
+      return;
+    }
+    if (typeof code === 'string' && [...code].length === 1) {
+      return gridAnnotAppendToSlot(annot, cell, code);
     }
   }
 
@@ -2458,7 +2552,7 @@ export async function mountEditor(root, notebookId) {
     if (!annot.cells) annot.cells = {};
     const cur = activeGridAnnot.cursor;
     annot.cells[`${cur.r},${cur.c}`] = { ch };
-    updateGridAnnotCellDOM(annot.id, cur.r, cur.c, ch);
+    gridAnnotRepaintCell(annot, cur.r, cur.c);
     // Advance to the next cell. Wrap to the next row when we run off
     // the right edge — keeps the kid moving forward without manual
     // arrow taps for long calculations.
@@ -2472,6 +2566,73 @@ export async function mountEditor(root, notebookId) {
     queueSave();
   }
 
+  // Drop a fresh fraction composite at the cursor. If the cursor is on
+  // an atom (e.g. the kid typed '5' then pressed FRAC), promote that
+  // atom into the numerator and land the cursor in the denominator,
+  // matching the work-block FRAC behaviour.
+  function gridAnnotInsertFraction(annot) {
+    pushUndo();
+    if (!annot.cells) annot.cells = {};
+    const cur = activeGridAnnot.cursor;
+    const existing = annot.cells[`${cur.r},${cur.c}`];
+    let composite;
+    let landSlot;
+    if (existing && existing.ch != null) {
+      composite = newFractionCell(existing.ch, '');
+      landSlot = 'den';
+    } else if (isComposite(existing)) {
+      // Already a composite — don't overwrite; enter its first slot.
+      cur.slot = compositeSlots(existing)[0] || null;
+      gridAnnotRepaintCell(annot, cur.r, cur.c);
+      return;
+    } else {
+      composite = newFractionCell();
+      landSlot = 'num';
+    }
+    annot.cells[`${cur.r},${cur.c}`] = composite;
+    cur.slot = landSlot;
+    gridAnnotRepaintCell(annot, cur.r, cur.c);
+    queueSave();
+  }
+
+  function gridAnnotAppendToSlot(annot, cell, ch) {
+    pushUndo();
+    const cur = activeGridAnnot.cursor;
+    const slotName = cur.slot;
+    cell[slotName] = (cell[slotName] || '') + ch;
+    gridAnnotRepaintCell(annot, cur.r, cur.c);
+    queueSave();
+  }
+
+  function gridAnnotSlotBackspace(annot, cell) {
+    pushUndo();
+    const cur = activeGridAnnot.cursor;
+    const slotName = cur.slot;
+    const current = cell[slotName] || '';
+    if (current.length > 0) {
+      cell[slotName] = current.slice(0, -1);
+      gridAnnotRepaintCell(annot, cur.r, cur.c);
+      queueSave();
+      return;
+    }
+    // Slot empty — collapse the composite when ALL slots are empty,
+    // otherwise jump to the previous slot.
+    const slots = compositeSlots(cell);
+    const allEmpty = slots.every((s) => !cell[s]);
+    if (allEmpty) {
+      delete annot.cells[`${cur.r},${cur.c}`];
+      cur.slot = null;
+      gridAnnotRepaintCell(annot, cur.r, cur.c);
+      queueSave();
+      return;
+    }
+    const idx = slots.indexOf(slotName);
+    if (idx > 0) {
+      cur.slot = slots[idx - 1];
+      gridAnnotRepaintCell(annot, cur.r, cur.c);
+    }
+  }
+
   function gridAnnotBackspace(annot) {
     pushUndo();
     if (!annot.cells) annot.cells = {};
@@ -2479,26 +2640,24 @@ export async function mountEditor(root, notebookId) {
     const key = `${cur.r},${cur.c}`;
     if (annot.cells[key]) {
       delete annot.cells[key];
-      updateGridAnnotCellDOM(annot.id, cur.r, cur.c, '');
+      gridAnnotRepaintCell(annot, cur.r, cur.c);
       queueSave();
       return;
     }
-    // Empty cell — back up one and clear that.
     if (cur.c > 0) {
       gridAnnotSetCursor(annot, cur.r, cur.c - 1);
       const prevKey = `${cur.r},${cur.c}`;
       if (annot.cells[prevKey]) {
         delete annot.cells[prevKey];
-        updateGridAnnotCellDOM(annot.id, cur.r, cur.c, '');
+        gridAnnotRepaintCell(annot, cur.r, cur.c);
         queueSave();
       }
     } else if (cur.r > 0) {
-      // Wrap up to the previous row's last column.
       gridAnnotSetCursor(annot, cur.r - 1, annot.cols - 1);
       const prevKey = `${cur.r},${cur.c}`;
       if (annot.cells[prevKey]) {
         delete annot.cells[prevKey];
-        updateGridAnnotCellDOM(annot.id, cur.r, cur.c, '');
+        gridAnnotRepaintCell(annot, cur.r, cur.c);
         queueSave();
       }
     }
@@ -2513,31 +2672,32 @@ export async function mountEditor(root, notebookId) {
 
   function gridAnnotSetCursor(annot, r, c) {
     const cur = activeGridAnnot.cursor;
-    if (cur.r === r && cur.c === c) return;
-    const prev = { r: cur.r, c: cur.c };
+    if (cur.r === r && cur.c === c && !cur.slot) return;
+    const prevR = cur.r;
+    const prevC = cur.c;
     cur.r = r;
     cur.c = c;
-    updateGridAnnotCursorDOM(annot.id, prev, cur);
+    cur.slot = null;
+    // Repaint both cells: prev to remove the cursor highlight + clear
+    // any active-slot styling, new to add the cursor class.
+    gridAnnotRepaintCell(annot, prevR, prevC);
+    gridAnnotRepaintCell(annot, cur.r, cur.c);
   }
 
-  function updateGridAnnotCellDOM(annotId, r, c, text) {
-    const annotEl = document.querySelector(`.worksheet__annot--grid[data-annot-id="${annotId}"]`);
+  // Repaint a single cell with its current value and the cursor's slot
+  // (when the cursor is parked on this cell). Adds the cursor class
+  // when the cell is the active one. Uses paintCell from grid.js so
+  // composites render the same way as in the main work area.
+  function gridAnnotRepaintCell(annot, r, c) {
+    const annotEl = document.querySelector(`.worksheet__annot--grid[data-annot-id="${annot.id}"]`);
     if (!annotEl) return;
     const cellEl = annotEl.querySelector(`.gridannot__cell[data-r="${r}"][data-c="${c}"]`);
-    if (cellEl) cellEl.textContent = text;
-  }
-
-  function updateGridAnnotCursorDOM(annotId, prev, next) {
-    const annotEl = document.querySelector(`.worksheet__annot--grid[data-annot-id="${annotId}"]`);
-    if (!annotEl) return;
-    if (prev) {
-      const prevEl = annotEl.querySelector(`.gridannot__cell[data-r="${prev.r}"][data-c="${prev.c}"]`);
-      if (prevEl) prevEl.classList.remove('gridannot__cell--cursor');
-    }
-    if (next) {
-      const nextEl = annotEl.querySelector(`.gridannot__cell[data-r="${next.r}"][data-c="${next.c}"]`);
-      if (nextEl) nextEl.classList.add('gridannot__cell--cursor');
-    }
+    if (!cellEl) return;
+    const cur = activeGridAnnot.cursor;
+    const isCursor = cur.r === r && cur.c === c;
+    const cell = annot.cells && annot.cells[`${r},${c}`];
+    paintCell(cellEl, cell, isCursor ? (cur.slot || null) : null);
+    cellEl.classList.toggle('gridannot__cell--cursor', isCursor);
   }
 
   function getCellAt(r, c) {

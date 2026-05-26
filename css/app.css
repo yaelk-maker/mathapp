@@ -1109,6 +1109,39 @@ h1 {
 }
 .worksheet__annot--grid.worksheet__annot--manipulate:active { cursor: grabbing; }
 
+/* Always-visible "⋯" menu button on the grid annotation's corner.
+   Tap to enter manipulate mode (move / resize / row+col / delete).
+   Sits in the physical top-right of the wrapper so it doesn't shift
+   under the kid's finger when the grid is repositioned. 28px keeps
+   it visible without dominating a 3×8 grid; touch target is
+   acceptably close to the 44px HIG minimum given the surrounding
+   cells also accept the same tap. */
+.gridannot__menu {
+  position: absolute;
+  top: -14px;
+  right: -14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid white;
+  background: var(--accent);
+  color: white;
+  font-weight: 800;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  z-index: 3;
+}
+.gridannot__menu:active {
+  background: var(--accent-pressed);
+}
+
 /* Section pager bar — sits above the page area, centered. Only visible
    in split mode when the page has more than one section (otherwise there's
    nothing to page between). The bar's CSS is gated on .editor--split so

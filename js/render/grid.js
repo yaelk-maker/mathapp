@@ -275,7 +275,10 @@ export function updateCursor(grid, prevCursor, nextCursor, getCellAt) {
 }
 
 // Render the contents of a single cell DOM node based on the value object.
-function paintCell(cellEl, value, activeSlot) {
+// Exported so worksheet.js can use the same composite-aware paint for
+// grid annotation cells — they share the cell shape ({ ch } atoms and
+// { type, ...slots } composites), so the rendering is identical.
+export function paintCell(cellEl, value, activeSlot) {
   cellEl.innerHTML = '';
   cellEl.classList.remove('cell--composite', 'cell--fraction', 'cell--pow', 'cell--sqrt', 'cell--nroot', 'cell--abs');
 
