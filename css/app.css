@@ -1042,6 +1042,73 @@ h1 {
   background: var(--accent-pressed);
 }
 
+/* --- Grid annotation (calculation pad floating on a worksheet image) ---
+   A small WorkBlock-shaped overlay positioned by fractional x/y/w (same
+   coordinate system as text annotations). Inside cells reuse the
+   monospaced-digit look from the main work area so a calculation on a
+   printed question reads in the same visual rhythm. Storage shape
+   mirrors a WorkBlock's sparse cells map; renderable cells receive a
+   data-r/data-c pair so the editor's keypad handlers can paint
+   single-cell updates without a full re-render. */
+.worksheet__annot--grid {
+  position: absolute;
+  background: white;
+  border: 1.5px solid rgba(11, 108, 242, 0.55);
+  border-radius: 4px;
+  padding: 0;
+  pointer-events: auto;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Touch-action: none lets pointerdown/move land here instead of
+     scrolling the page when the kid drags the manipulate handle. */
+  touch-action: none;
+}
+.gridannot__grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
+  /* aspect-ratio derives the grid's height from its width so cells stay
+     square. Without this the grid would collapse to font-line height
+     and cells would be wide-flat rectangles. */
+  aspect-ratio: var(--cols) / var(--rows);
+  font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  /* cqh reads 1% of the worksheet overlay's height. clamp keeps the
+     digit legible across a tiny PDF page or a tall scanned worksheet. */
+  font-size: clamp(0.65rem, 2.4cqh, 1.4rem);
+  line-height: 1;
+  color: #111;
+  width: 100%;
+}
+.gridannot__cell {
+  border-right: 1px solid #d8d8d8;
+  border-bottom: 1px solid #d8d8d8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  min-width: 0;
+}
+/* Paint the outermost top + left edges so the grid has a complete
+   rule-square box inside the blue wrapper border. */
+.gridannot__cell[data-r="0"] { border-top: 1px solid #d8d8d8; }
+.gridannot__cell[data-c="0"] { border-left: 1px solid #d8d8d8; }
+.gridannot__cell--cursor {
+  background: rgba(11, 108, 242, 0.16);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+/* Manipulate mode dims the wrapper edge so the kid sees it's grabbed,
+   matching the text annotation's manipulate-mode treatment. */
+.worksheet__annot--grid.worksheet__annot--manipulate {
+  box-shadow: 0 0 0 2px var(--accent);
+  cursor: grab;
+}
+.worksheet__annot--grid.worksheet__annot--manipulate:active { cursor: grabbing; }
+
 /* Section pager bar — sits above the page area, centered. Only visible
    in split mode when the page has more than one section (otherwise there's
    nothing to page between). The bar's CSS is gated on .editor--split so
@@ -1172,6 +1239,71 @@ h1 {
      the first row of cells. Without this, the ⋮⋮ chip clipped into the top
      digits of the leftmost calculation. */
   padding-top: 22px;
+}
+
+/* Exercise label header — "תרגיל <N>" sits above each work-block grid.
+   The static prefix is non-interactive; the chip on its end is the
+   tap-to-edit label the kid uses when the worksheet starts at a number
+   other than 1 (auto-incremented from there by "+ תרגיל חדש"). The
+   header lives in the workblock's flow so the wrapper grows by ~44px
+   to host it, with physical-left padding to clear the absolutely-
+   positioned drag handle at left:8px / width:44px. */
+.workblock__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  /* dir="rtl" on the header itself flips justify-content so the text
+     sits at logical start (= physical right on an RTL page). */
+  justify-content: flex-start;
+  padding: 6px 12px 4px 60px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+  line-height: 1.25;
+  position: relative;
+  z-index: 2;
+  /* Block out the workblock's own padding-top:22 from being eaten by
+     a margin-top collapse with the header. */
+  margin-top: 0;
+}
+.workblock__exercise-prefix {
+  user-select: none;
+  -webkit-user-select: none;
+  color: #555;
+}
+.workblock__exercise-label {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0.15em 0.6em;
+  border: 1.5px solid #d8d8d8;
+  border-radius: 6px;
+  background: #fffaf0;
+  color: var(--accent);
+  font-weight: 800;
+  text-align: center;
+  cursor: text;
+  outline: none;
+  font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  -webkit-tap-highlight-color: transparent;
+  /* Keep selection enabled inside the chip so taps place the caret. */
+  -webkit-user-select: text;
+  user-select: text;
+}
+.workblock__exercise-label:empty::before {
+  content: '?';
+  color: rgba(0, 0, 0, 0.30);
+}
+.workblock__exercise-label:focus {
+  background: white;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(11, 108, 242, 0.22);
+}
+/* Hide the wrapper-side default editing chrome that contenteditable
+   shows on iPadOS Safari — the in-app keypad drives the chip and the
+   system controls just clutter the view. */
+.workblock__exercise-label::selection {
+  background: rgba(11, 108, 242, 0.20);
 }
 
 .grid {

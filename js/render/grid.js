@@ -15,12 +15,61 @@ import {
 } from '../page-model.js';
 
 export function renderWorkBlock(block, options = {}) {
-  const { onCellTap, cursor, onDelete, onMovePart } = options;
+  const { onCellTap, cursor, onDelete, onMovePart, onLabelEdit } = options;
 
   const wrapper = document.createElement('div');
   wrapper.className = 'workblock';
   wrapper.setAttribute('dir', 'ltr');
   wrapper.dataset.blockId = block.id;
+
+  // Exercise header — "תרגיל <label>" rendered above the grid. The label
+  // is contenteditable so the kid can tap it and override (e.g. when the
+  // worksheet starts at 8 or uses Hebrew letters). The prefix "תרגיל" is
+  // a static label rendered around it, so only the identifier is editable.
+  // dir="rtl" so the static "תרגיל" reads right-to-left even though the
+  // grid wrapper above is dir="ltr" for math flow.
+  const header = document.createElement('header');
+  header.className = 'workblock__header';
+  header.setAttribute('dir', 'rtl');
+  const prefix = document.createElement('span');
+  prefix.className = 'workblock__exercise-prefix';
+  prefix.textContent = 'תרגיל';
+  const labelEl = document.createElement('span');
+  labelEl.className = 'workblock__exercise-label';
+  labelEl.setAttribute('contenteditable', 'plaintext-only');
+  labelEl.setAttribute('inputmode', 'none');
+  labelEl.setAttribute('spellcheck', 'false');
+  labelEl.setAttribute('dir', 'auto');
+  labelEl.setAttribute('aria-label', 'מספר תרגיל');
+  labelEl.dataset.blockId = block.id;
+  labelEl.textContent = block.label || '';
+  if (onLabelEdit) {
+    labelEl.addEventListener('input', () => onLabelEdit(block.id, labelEl.textContent));
+    // Stop the tap from bubbling to the grid (which would steal focus
+    // and move the workblock cursor) and from the workblock wrapper's
+    // drag-handle pointerdown listener.
+    labelEl.addEventListener('pointerdown', (e) => e.stopPropagation());
+    labelEl.addEventListener('mousedown', (e) => e.stopPropagation());
+    // Select-all-on-focus so the next keypress replaces the existing
+    // label instead of appending to it. Without this a kid tapping the
+    // chip showing "1" and pressing "8" would see "18", not "8".
+    // requestAnimationFrame waits one tick so the browser's own caret
+    // placement (from the focusing tap) doesn't immediately clobber
+    // our selection.
+    labelEl.addEventListener('focus', () => {
+      requestAnimationFrame(() => {
+        if (document.activeElement !== labelEl) return;
+        const range = document.createRange();
+        range.selectNodeContents(labelEl);
+        const sel = window.getSelection();
+        if (!sel) return;
+        sel.removeAllRanges();
+        sel.addRange(range);
+      });
+    });
+  }
+  header.append(prefix, labelEl);
+  wrapper.appendChild(header);
 
   const grid = document.createElement('div');
   grid.className = 'grid';
