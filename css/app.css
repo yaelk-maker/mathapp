@@ -593,22 +593,42 @@ h1 {
   gap: 16px;
 }
 
-/* --- Split view: worksheet next to work block (worksheet on the right
-   in the RTL flow direction; work block on the left). Best on landscape
-   iPad; usable but cramped on portrait. --- */
+/* --- Split view: worksheet on one half, all exercise blocks stacked
+   vertically (portrait) on the other half. Previously every workblock
+   was a flex sibling at max-width:50%, which crushed multiple work
+   blocks into narrow vertical strips when the kid had >1 exercise on
+   a page. The grid layout pins the worksheet to column 1 spanning
+   every row, and the workblocks auto-flow into column 2 as stacked
+   rows — so 5 exercise sections render as 5 portrait calculation
+   cards alongside the worksheet, not 5 thin columns. --- */
 .editor--split #page {
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: min-content;
+  align-items: start;
+  justify-items: center;
   gap: 12px;
+  /* Reset the flex defaults that the non-split rules establish. */
+  flex-direction: initial;
 }
-.editor--split #page > .worksheet,
-.editor--split #page > .workblock {
-  flex: 1 1 0;
+.editor--split #page > .worksheet {
+  grid-column: 1;
+  /* span 999 so the worksheet column always covers every row the
+     workblocks occupy — without an explicit row span the worksheet
+     would only fill row 1 and leave a gap if there are many work
+     blocks. 999 is well above any plausible exercise count. */
+  grid-row: 1 / span 999;
+  align-self: start;
+  justify-self: stretch;
   min-width: 0;
-  max-width: 50%;
+  max-width: 100%;
 }
 .editor--split #page > .workblock {
+  grid-column: 2;
+  /* auto-placed grid-row — each workblock takes the next row */
+  justify-self: stretch;
+  min-width: 0;
+  max-width: 100%;
   /* If the natural grid is wider than the column, allow horizontal scroll
      within the workblock instead of overflowing the page. */
   overflow-x: auto;
@@ -1109,13 +1129,14 @@ h1 {
 }
 .worksheet__annot--grid.worksheet__annot--manipulate:active { cursor: grabbing; }
 
-/* Always-visible "⋯" menu button on the grid annotation's corner.
-   Tap to enter manipulate mode (move / resize / row+col / delete).
-   Sits in the physical top-right of the wrapper so it doesn't shift
-   under the kid's finger when the grid is repositioned. 28px keeps
-   it visible without dominating a 3×8 grid; touch target is
-   acceptably close to the 44px HIG minimum given the surrounding
-   cells also accept the same tap. */
+/* Persistent corner "⋮⋮" handle. Press and drag to reposition the
+   grid annotation; tap (no drift) to open manipulate mode for
+   resize / row+col / delete. The icon mirrors the workblock's
+   reorder handle so the kid recognises it as a draggable affordance
+   rather than a generic menu. Sits at the physical top-right so
+   it doesn't shift under the kid's finger when the grid moves.
+   touch-action: none keeps Safari from interpreting the press as a
+   page scroll while we're trying to capture the drag. */
 .gridannot__menu {
   position: absolute;
   top: -14px;
@@ -1127,18 +1148,21 @@ h1 {
   background: var(--accent);
   color: white;
   font-weight: 800;
-  font-size: 1rem;
+  font-size: 0.85rem;
   line-height: 1;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.22);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  letter-spacing: -0.05em;
   -webkit-tap-highlight-color: transparent;
   z-index: 3;
 }
 .gridannot__menu:active {
+  cursor: grabbing;
   background: var(--accent-pressed);
 }
 

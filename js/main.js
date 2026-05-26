@@ -163,6 +163,9 @@ async function renderHome() {
       <div class="toolbar">
         <button class="btn" id="new-notebook">+ מחברת חדשה</button>
         <button class="btn btn--ghost" id="new-folder">+ תיקייה</button>
+        <button class="btn btn--ghost" id="backup-all" ${
+          notebooks.length === 0 ? 'disabled' : ''
+        }>💾 גיבוי הכל</button>
         <button class="btn btn--ghost" id="restore-all">📥 שחזור</button>
         <button class="btn btn--ghost" id="open-trash">🗑️ נמחקו לאחרונה${
           trashCount > 0 ? ` (${trashCount})` : ''
@@ -219,6 +222,31 @@ async function renderHome() {
   document.getElementById('open-trash').addEventListener('click', () => {
     window.location.hash = '#/trash';
   });
+
+  const backupAllBtn = document.getElementById('backup-all');
+  if (backupAllBtn) {
+    backupAllBtn.addEventListener('click', async () => {
+      if (backupAllBtn.disabled) return;
+      try {
+        // exportNotebooksToJSON already walks every notebook on the
+        // device — pages, strokes, and referenced worksheet blobs —
+        // and produces a single JSON the import path can read back
+        // intact. Wrap it through shareJSON so the kid lands in the
+        // iPadOS share sheet and can save to Files / send via mail.
+        const data = await exportNotebooksToJSON();
+        const stamp = new Date().toISOString().slice(0, 10);
+        await shareJSON(data, `mathapp-all-${stamp}.json`);
+      } catch (err) {
+        console.error('Backup-all failed:', err);
+        await confirmDialog({
+          title: 'הגיבוי נכשל',
+          body: err.message || 'נסי שוב מאוחר יותר.',
+          confirmLabel: 'אישור',
+          cancelLabel: 'סגירה'
+        });
+      }
+    });
+  }
 
   document.getElementById('restore-all').addEventListener('click', async () => {
     const file = await pickJSONFile();
