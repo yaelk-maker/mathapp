@@ -16,6 +16,7 @@ import {
   DEFAULT_ANNOTATION_FONT_CQH,
   isGridAnnotation
 } from '../page-model.js';
+import { paintCell } from './grid.js';
 
 const urlCache = new Map(); // blobId -> objectURL
 
@@ -379,8 +380,12 @@ function buildGridAnnotationEl(annot, block, options) {
       cellEl.dataset.r = r;
       cellEl.dataset.c = c;
       const cell = annot.cells && annot.cells[`${r},${c}`];
-      if (cell && cell.ch != null) cellEl.textContent = cell.ch;
-      if (isFocused && focus.r === r && focus.c === c) {
+      const isFocusedCell = isFocused && focus.r === r && focus.c === c;
+      // paintCell handles both atom cells ({ ch }) and composites
+      // ({ type: 'fraction', num, den }), giving the grid annotation
+      // the same fraction rendering the main work area uses.
+      paintCell(cellEl, cell, isFocusedCell ? (focus.slot || null) : null);
+      if (isFocusedCell) {
         cellEl.classList.add('gridannot__cell--cursor');
       }
       grid.appendChild(cellEl);
@@ -402,37 +407,36 @@ function buildGridAnnotationEl(annot, block, options) {
 
   el.appendChild(grid);
 
+  // Persistent "⋯" menu button in the corner — opens manipulate mode
+  // (drag / resize / row+col / delete) on a single tap, no long-press
+  // required. The text-annotation flow uses a focus-only badge in the
+  // overlay; grid annotations get this always-visible button instead
+  // because the wrapper border is too thin a long-press target and
+  // the kid asked for an easier way to operate the calculation pad.
+  const menuBtn = document.createElement('button');
+  menuBtn.type = 'button';
+  menuBtn.className = 'gridannot__menu';
+  menuBtn.textContent = '⋯';
+  menuBtn.title = 'הזיזי / שני גודל / מחקי';
+  menuBtn.setAttribute('aria-label', 'אפשרויות (הזזה, שינוי גודל, מחיקה)');
+  menuBtn.addEventListener('mousedown', (e) => e.preventDefault());
+  menuBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  menuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    enterGridManipulateMode(el, annot, block, options);
+  });
+  el.appendChild(menuBtn);
+
   bindGridAnnotationInteractions(el, annot, block, options);
   return el;
 }
 
 function bindGridAnnotationInteractions(el, annot, block, options) {
-  // Tracks whether the kid has actually placed any digit in this grid.
-  // Same idea as the text-annotation everTyped flag — an empty grid that
-  // was created by a stray tap and never typed into is cleaned up so the
-  // worksheet doesn't accumulate ghost grid placeholders.
-  const isEmptyGrid = () => !annot.cells || Object.keys(annot.cells).length === 0;
-  let everTyped = !isEmptyGrid();
-  // The focused cell tap path is the canonical "the kid is using this
-  // annotation" signal — once any cell has been tapped (even before
-  // typing), don't auto-delete on blur. Without this, focusing an
-  // empty grid to start typing wouldn't survive the focus pass that
-  // re-renders.
-  if (options.onGridAnnotFocus) {
-    el.addEventListener(
-      'pointerdown',
-      () => { everTyped = everTyped || true; },
-      true
-    );
-  }
-
   // Long-press anywhere on the grid wrapper (but NOT on a cell — cell
-  // taps focus the cell for typing) enters manipulate mode. Same gesture
-  // and timing as text annotations so the kid's muscle memory carries
-  // over. The press lands on the wrapper's padding/border because we
-  // mark cell taps with stopPropagation in the grid click handler above
-  // is NOT enough — pointerdown still bubbles. We check the target
-  // explicitly to ignore cell-originating presses.
+  // taps focus the cell for typing) enters manipulate mode. The
+  // persistent "⋯" button is the primary path; long-press remains as
+  // a power-user shortcut for kids who'd rather press-and-hold than
+  // aim at the corner button.
   let pressTimer = null;
   let startX = 0, startY = 0;
   let pointerId = null;
@@ -469,41 +473,6 @@ function bindGridAnnotationInteractions(el, annot, block, options) {
   el.addEventListener('pointerup', endPress);
   el.addEventListener('pointercancel', endPress);
   el.addEventListener('contextmenu', (e) => e.preventDefault());
-
-  // Manipulate-mode badge — same UX as text annotations so a tap-only
-  // path exists for kids who can't reliably long-press. The badge sits
-  // above the grid; tapping it opens the manipulate chrome.
-  let manipulateBadge = null;
-  const removeManipulateBadge = () => {
-    if (manipulateBadge) { manipulateBadge.remove(); manipulateBadge = null; }
-  };
-  const showManipulateBadge = () => {
-    removeManipulateBadge();
-    const overlay = el.closest('.worksheet__overlay');
-    if (!overlay) return;
-    manipulateBadge = document.createElement('button');
-    manipulateBadge.type = 'button';
-    manipulateBadge.className = 'worksheet__annot-manipulate-badge';
-    manipulateBadge.textContent = '⋯';
-    manipulateBadge.title = 'הזיזי / שני גודל / מחקי';
-    manipulateBadge.setAttribute('aria-label', 'אפשרויות (הזזה, שינוי גודל, מחיקה)');
-    manipulateBadge.style.left = `${(annot.x * 100).toFixed(3)}%`;
-    manipulateBadge.style.top = `calc(${(annot.y * 100).toFixed(3)}% - 50px)`;
-    manipulateBadge.addEventListener('mousedown', (e) => e.preventDefault());
-    manipulateBadge.addEventListener('pointerdown', (e) => e.stopPropagation());
-    manipulateBadge.addEventListener('click', (e) => {
-      e.stopPropagation();
-      removeManipulateBadge();
-      enterGridManipulateMode(el, annot, block, options);
-    });
-    overlay.appendChild(manipulateBadge);
-  };
-  // Surface the badge when this grid is the focused one. Editor sets
-  // focusedGridAnnot.annotId before calling renderBlocks, so on the
-  // next paint the focused grid arrives here with isFocused = true.
-  if (options.focusedGridAnnot && options.focusedGridAnnot.annotId === annot.id) {
-    requestAnimationFrame(showManipulateBadge);
-  }
 }
 
 function enterGridManipulateMode(el, annot, block, options) {
@@ -853,6 +822,20 @@ function bindCreateOnTap(overlay, block, options) {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const now = performance.now();
+
+    // Grid annotations create on a SINGLE deliberate tap — accidental
+    // ghost grids are obvious (visible cell box) and easy to delete via
+    // the 🗑 chrome button, so the double-tap protection that text
+    // annotations need (to avoid invisible empty contenteditables) is
+    // overkill for grids. Text annotations keep the double-tap flow.
+    if (kind === 'grid') {
+      const xFrac = clamp01(x / rect.width);
+      const yFrac = clamp01(y / rect.height);
+      lastTap = null;
+      removeIndicator();
+      options.onCreateAnnotation(block.id, xFrac, yFrac, kind);
+      return;
+    }
 
     // Second tap within the double-tap window AND near the first tap →
     // confirm creation at the FIRST-tap position (so the kid's two taps
