@@ -62,7 +62,26 @@ async function init() {
 
   if ('serviceWorker' in navigator) {
     try {
-      await navigator.serviceWorker.register('./sw.js');
+      const reg = await navigator.serviceWorker.register('./sw.js');
+      // Force an update check on every page load. Safari is slow about
+      // checking for new SW versions on its own (sometimes >24h),
+      // which leaves installed PWAs stuck on stale shells for days
+      // after a deploy. Calling reg.update() asks the browser to
+      // re-fetch sw.js right now and install any new version it
+      // finds. Cheap network request; doesn't block startup.
+      reg.update().catch(() => {});
+      // When a new service worker takes over this client (i.e. the
+      // one we just registered called skipWaiting + clients.claim),
+      // reload the page so the running tab swaps from old modules in
+      // memory to the newly cached ones. Without this, the kid would
+      // have to manually close and reopen the PWA twice to see a new
+      // deploy. Guarded by a flag so a one-off SW restart can't loop.
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloaded) return;
+        reloaded = true;
+        window.location.reload();
+      });
     } catch (err) {
       console.warn('Service worker registration failed:', err);
     }
