@@ -34,6 +34,9 @@ import {
   migrateWorkBlockMargin,
   migrateWorkBlockSize,
   newAnnotation,
+  newGridAnnotation,
+  isGridAnnotation,
+  nextExerciseLabel,
   getAnnotations
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor } from './render/grid.js';
@@ -114,22 +117,36 @@ export async function mountEditor(root, notebookId) {
   //      gets visibly bigger cells without losing work. Order matters:
   //      margin migration runs first because it can grow cols, then size
   //      migration trims them back if the new max fits.
+  //   3. Backfill exercise labels on work blocks that pre-date the
+  //      Exercise-label feature: assign sequential "1", "2", … in the
+  //      order the blocks appear on the page. The kid edits the first
+  //      label if their worksheet starts somewhere else; subsequent
+  //      additions auto-increment from whatever's already there.
   {
     let migrated = false;
+    let exerciseCounter = 1;
     for (const block of page.blocks) {
       if (block.type === BLOCK.WORK) {
         if (migrateWorkBlockMargin(block)) migrated = true;
         if (migrateWorkBlockSize(block)) migrated = true;
+        if (block.label == null) {
+          block.label = String(exerciseCounter);
+          migrated = true;
+        }
+        exerciseCounter += 1;
       } else if (block.type === BLOCK.WORKSHEET && Array.isArray(block.annotations)) {
         // Prune annotations that were created (often by stray taps in
         // annotate mode) but never typed into. Pre-cleanup notebooks
         // accumulated visible "הקלידי…" placeholders all over the
         // worksheet because empty annotations persisted across saves.
         // Future empties auto-delete on blur via worksheet.js; this
-        // catches the legacy ones.
+        // catches the legacy ones. Grid annotations are kept regardless
+        // of content — they're a deliberate UI element (the kid taps
+        // to create one and may have left it empty momentarily).
         const before = block.annotations.length;
         block.annotations = block.annotations.filter(
-          (a) => (a.text && a.text.length > 0) ||
+          (a) => isGridAnnotation(a) ||
+                 (a.text && a.text.length > 0) ||
                  (typeof a.html === 'string' && a.html.length > 0)
         );
         if (block.annotations.length !== before) migrated = true;
@@ -168,11 +185,20 @@ export async function mountEditor(root, notebookId) {
     }
   }
 
-  // Annotate mode: when true, tapping an empty area of a worksheet image
-  // drops a new typed-text annotation at that point. Off by default; the
-  // kid toggles it with the 📝 toolbar button. Mutually exclusive with pen
-  // mode — drawing and typing-on-paper compete for the same gesture.
-  let annotateMode = false;
+  // Annotate mode: when set, tapping an empty area of a worksheet image
+  // drops a new annotation of that kind at that point. Off (null) by
+  // default; the kid toggles it with the 🔢 / 📝 toolbar buttons.
+  // Mutually exclusive with pen mode — drawing and typing-on-paper
+  // compete for the same gesture. Two kinds:
+  //   'grid' — a small grid-cell annotation for calculations. Default.
+  //   'text' — a free-text contenteditable for written notes.
+  let annotateKind = null;
+
+  // Active grid-annotation focus. When set, the in-app keypad routes
+  // its presses into the annotation's cells instead of the work block.
+  // Cleared when the kid taps a workblock cell or focuses a text
+  // annotation — the focus targets are mutually exclusive.
+  let activeGridAnnot = null;
 
   // When the kid focuses a worksheet annotation, the in-app keypad routes
   // its presses to insert text at the caret instead of into the active
@@ -247,8 +273,9 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↺ <span class="label">ביטול</span></button>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת קובץ" title="צילום, תמונה או PDF">📷 <span class="label">דף</span></button>
-          <button class="btn btn--ghost" id="toggle-annotate" aria-label="כתיבה על דף" title="כתיבה על דף">📝 <span class="label">כתיבה על דף</span></button>
-          <button class="btn btn--ghost" id="add-work" aria-label="אזור פתרון">➕ <span class="label">אזור פתרון</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-grid" aria-label="חישוב על דף" title="חישוב על דף — תיבת חישוב עם משבצות">🔢 <span class="label">חישוב על דף</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — תיבת טקסט חופשי">📝 <span class="label">טקסט על דף</span></button>
+          <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
           <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
           <span class="editor__sep"></span>
@@ -332,21 +359,31 @@ export async function mountEditor(root, notebookId) {
   );
   document.getElementById('add-work').addEventListener('click', () => addWorkBlock());
 
-  // Annotate-mode toggle. Mutually exclusive with pen mode (the pencil canvas
-  // claims pointer events when active, which would swallow taps meant for
-  // creating annotations). Keep the in-app keypad visible — annotation
-  // typing now routes through it (see getFocusedAnnotation + the
-  // annotation branches in handleKey/handleHebrewKey/handleEnglishKey).
-  const annotateBtn = document.getElementById('toggle-annotate');
-  annotateBtn.addEventListener('click', () => {
-    annotateMode = !annotateMode;
-    annotateBtn.classList.toggle('btn--active', annotateMode);
-    if (annotateMode && pencilEnabled) {
+  // Annotate-mode toggles — one for grid (חישוב על דף), one for text
+  // (טקסט על דף). The two kinds are mutually exclusive with each other
+  // AND with pen mode (the pencil canvas claims pointer events when
+  // active, which would swallow taps meant for creating annotations).
+  // Grid is the default mode the kid reaches for calculations under a
+  // printed worksheet question; text remains available for free-form
+  // notes.
+  const annotateGridBtn = document.getElementById('toggle-annotate-grid');
+  const annotateTextBtn = document.getElementById('toggle-annotate-text');
+  function setAnnotateKind(kind) {
+    annotateKind = kind;
+    annotateGridBtn.classList.toggle('btn--active', kind === 'grid');
+    annotateTextBtn.classList.toggle('btn--active', kind === 'text');
+    if (kind && pencilEnabled) {
       // Drop pen mode silently — the kid asked for typing, the explicit
       // toggle is more recent intent than the still-active pen state.
       setPencilEnabled(false);
     }
     renderBlocks();
+  }
+  annotateGridBtn.addEventListener('click', () => {
+    setAnnotateKind(annotateKind === 'grid' ? null : 'grid');
+  });
+  annotateTextBtn.addEventListener('click', () => {
+    setAnnotateKind(annotateKind === 'text' ? null : 'text');
   });
 
   // Section pager (centered above the page in split mode). Each arrow
@@ -462,9 +499,10 @@ export async function mountEditor(root, notebookId) {
     // for the whole page while active, so annotation taps wouldn't reach
     // their overlay. Drop annotate when pen comes on, and re-render so the
     // worksheet sheds its .worksheet--annotate class.
-    if (pencilEnabled && annotateMode) {
-      annotateMode = false;
-      annotateBtn.classList.remove('btn--active');
+    if (pencilEnabled && annotateKind) {
+      annotateKind = null;
+      annotateGridBtn.classList.remove('btn--active');
+      annotateTextBtn.classList.remove('btn--active');
       renderBlocks();
     }
     requestAnimationFrame(() => resizeAndReplay());
@@ -730,9 +768,16 @@ export async function mountEditor(root, notebookId) {
     for (const block of page.blocks) {
       let el = null;
       if (block.type === BLOCK.WORKSHEET) {
+        // focusedGridAnnot is read by buildGridAnnotationEl to paint
+        // the active cell's cursor highlight. Pass it only when the
+        // active grid annotation belongs to THIS worksheet block —
+        // otherwise the cursor would render on a grid in another section.
+        const gridFocus = (activeGridAnnot && activeGridAnnot.worksheetBlockId === block.id)
+          ? { annotId: activeGridAnnot.annotId, r: activeGridAnnot.cursor.r, c: activeGridAnnot.cursor.c }
+          : null;
         el = await renderWorksheetBlock(block, {
           onDelete: (id) => removeBlock(id),
-          annotateMode,
+          annotateMode: annotateKind,
           onCreateAnnotation: createAnnotation,
           onAnnotationChanged: (_blockId) => queueSave(),
           // Push an undo snapshot when the kid enters manipulate mode
@@ -740,15 +785,21 @@ export async function mountEditor(root, notebookId) {
           // A−/A+ changes can be undone with ↺. Without this, an
           // accidental drag had no recovery path.
           onAnnotationManipulateStart: (_blockId, _annotId) => pushUndo(),
-          onDeleteAnnotation: deleteAnnotation
+          onDeleteAnnotation: deleteAnnotation,
+          focusedGridAnnot: gridFocus,
+          onGridAnnotCellTap: focusGridAnnotCell
         });
       } else if (block.type === BLOCK.WORK) {
         // Only the active work block carries a cursor — without this every
         // grid painted a cell--cursor at (cursor.r, cursor.c), so the kid
         // saw the blue highlight echoing across every work block on the page.
+        // When a grid annotation is focused, the workblock cursor is
+        // suppressed too so the kid sees the active cursor in exactly
+        // one place at a time (the grid annot's cell).
         const isActive = block === activeWorkBlock;
+        const showCursor = isActive && !activeGridAnnot;
         const { wrapper, grid } = renderWorkBlock(block, {
-          cursor: isActive ? cursor : null,
+          cursor: showCursor ? cursor : null,
           onCellTap: (r, c) => {
             // Tapping a cell switches focus to that work block (if there
             // are several) and back to the math keypad.
@@ -760,6 +811,11 @@ export async function mountEditor(root, notebookId) {
             // the cell the kid just tapped.
             const annotEl = getFocusedAnnotation();
             if (annotEl) annotEl.blur();
+            // Drop any active grid-annot focus — the kid is back in
+            // the main work area, so the keypad must stop routing into
+            // the worksheet overlay's grid annotation.
+            const hadGridAnnot = activeGridAnnot != null;
+            activeGridAnnot = null;
             if (activeWorkBlock !== block) {
               clearActiveCursorHighlight();
               activeWorkBlock = block;
@@ -774,8 +830,12 @@ export async function mountEditor(root, notebookId) {
               if (idx >= 0) activeSectionIndex = idx;
             }
             if (keypadMode !== 'math') setKeypadMode('math');
+            // If a grid annotation was previously focused, re-render so
+            // its cell-cursor highlight clears.
+            if (hadGridAnnot) renderBlocks();
             moveCursor(r, c);
           },
+          onLabelEdit: handleExerciseLabelEdit,
           onMovePart: (part, drow, dcol) => movePartAndSave(block, part, drow, dcol),
           onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
         });
@@ -1226,29 +1286,98 @@ export async function mountEditor(root, notebookId) {
 
   // ---------- worksheet annotations ----------
 
-  // Drop a new typed-text annotation at (xFrac, yFrac), then re-render so
-  // the new element exists in the DOM and the kid can focus it to start
-  // typing. Position is stored as 0..1 fractions of the rendered overlay,
-  // so the annotation stays anchored at any display size or zoom.
-  async function createAnnotation(blockId, xFrac, yFrac) {
+  // Drop a new annotation at (xFrac, yFrac), then re-render so the new
+  // element exists in the DOM and the kid can focus it to start typing.
+  // Position is stored as 0..1 fractions of the rendered overlay, so the
+  // annotation stays anchored at any display size or zoom.
+  //
+  // kind selects the annotation flavor:
+  //   'grid' — a small grid-cell calculation pad (default for new taps
+  //            when the kid has the 🔢 toolbar button enabled).
+  //   'text' — a free-form contenteditable for written notes.
+  async function createAnnotation(blockId, xFrac, yFrac, kind = 'grid') {
     const block = page.blocks.find((b) => b.id === blockId);
     if (!block || block.type !== BLOCK.WORKSHEET) return;
     pushUndo();
     if (!Array.isArray(block.annotations)) block.annotations = [];
-    // Default width is generous (~22% of image width). The annotation
-    // shrinks naturally as text fills it — there's no max width — but
-    // starting wide lets short answers sit on one line.
-    const annot = newAnnotation({ x: xFrac, y: yFrac, w: 0.22 });
+    let annot;
+    if (kind === 'grid') {
+      // Grid annotation default size is wider than a text annotation
+      // (~30% of image width) so the kid sees a useful 3×8 cell layout
+      // without immediately having to resize.
+      annot = newGridAnnotation({ x: xFrac, y: yFrac, w: 0.30 });
+    } else {
+      // Default width is generous (~22% of image width). The annotation
+      // shrinks naturally as text fills it — there's no max width — but
+      // starting wide lets short answers sit on one line.
+      annot = newAnnotation({ x: xFrac, y: yFrac, w: 0.22 });
+      // Drop any previously-focused grid annotation — focusing the new
+      // text contenteditable is the kid's signal that they're switching
+      // input target, but blur on a text annot doesn't automatically
+      // clear activeGridAnnot, which would leak the routing.
+      activeGridAnnot = null;
+    }
     block.annotations.push(annot);
     queueSave();
-    await renderBlocks();
-    // Focus the freshly-placed annotation so the kid can immediately type.
-    // Defer to next frame so the contenteditable is wired up by the
-    // render pass before we move the caret into it.
-    requestAnimationFrame(() => {
-      const el = pageHost.querySelector(`[data-annot-id="${annot.id}"]`);
-      if (el) el.focus();
-    });
+    if (kind === 'grid') {
+      // Immediately focus the new grid's top-left cell so the kid can
+      // start typing without an extra tap. focusGridAnnotCell handles
+      // the re-render + cursor placement.
+      focusGridAnnotCell(blockId, annot.id, 0, 0);
+    } else {
+      await renderBlocks();
+      // Focus the freshly-placed annotation so the kid can immediately
+      // type. Defer to next frame so the contenteditable is wired up
+      // by the render pass before we move the caret into it.
+      requestAnimationFrame(() => {
+        const el = pageHost.querySelector(`[data-annot-id="${annot.id}"]`);
+        if (el) el.focus();
+      });
+    }
+  }
+
+  // Tap-into-cell handler shared by every grid annotation on the page.
+  // Sets the keypad focus to this cell so subsequent presses land there.
+  // Clears the active workblock cursor highlight on the way in — the
+  // two focus targets are mutually exclusive.
+  function focusGridAnnotCell(worksheetBlockId, annotId, r, c) {
+    const block = page.blocks.find((b) => b.id === worksheetBlockId);
+    if (!block) return;
+    const annot = (block.annotations || []).find((a) => a.id === annotId);
+    if (!annot || !isGridAnnotation(annot)) return;
+    // Drop work-block cursor + any focused text annotation. The keypad
+    // will route into the grid annotation from here on.
+    const textAnnotEl = getFocusedAnnotation();
+    if (textAnnotEl) textAnnotEl.blur();
+    clearActiveCursorHighlight();
+    // Keep the workblock reference around for re-activation when the
+    // kid taps back into a workblock cell, but clear the in-grid
+    // cursor so its highlight doesn't render alongside the grid-annot
+    // cursor.
+    activeGridAnnot = {
+      worksheetBlockId,
+      annotId,
+      cursor: {
+        r: Math.max(0, Math.min(annot.rows - 1, r)),
+        c: Math.max(0, Math.min(annot.cols - 1, c))
+      }
+    };
+    if (keypadMode !== 'math') setKeypadMode('math');
+    renderBlocks();
+  }
+
+  // Exercise-label edit handler — persist the kid's typed override.
+  // Called on every `input` event from the contenteditable label chip.
+  // Trim trailing whitespace so a stray newline (from accidental ⏎
+  // routing) doesn't get baked into the stored label.
+  function handleExerciseLabelEdit(blockId, raw) {
+    const block = page.blocks.find((b) => b.id === blockId);
+    if (!block || block.type !== BLOCK.WORK) return;
+    const cleaned = (raw || '').replace(/\s+/g, ' ').trim();
+    if (block.label === cleaned) return;
+    pushUndo();
+    block.label = cleaned;
+    queueSave();
   }
 
   async function deleteAnnotation(blockId, annotId) {
@@ -1282,6 +1411,17 @@ export async function mountEditor(root, notebookId) {
     const firstNewWs = newWs[0];
     const restOfNewWs = newWs.slice(1);
 
+    // Helper used by every paired-section push below — derive the next
+    // exercise label from whatever work block is currently last on the
+    // page. Each push appends to page.blocks, so the "previous" block
+    // is naturally the last one in document order at the moment we
+    // call this.
+    const nextLabelForAppend = () => {
+      const wbs = page.blocks.filter((b) => b.type === BLOCK.WORK);
+      const prev = wbs.length ? wbs[wbs.length - 1].label : '';
+      return nextExerciseLabel(prev) || String(wbs.length + 1);
+    };
+
     if (!hasExistingWorksheet) {
       // First worksheet on the page — insert it ahead of the implicit
       // first work block so the kid's existing work area is paired with
@@ -1294,11 +1434,11 @@ export async function mountEditor(root, notebookId) {
       // the new worksheet AND a fresh work block right after it. Without
       // this the kid uploads a second page but has no place to solve it.
       page.blocks.push(firstNewWs);
-      page.blocks.push(newWorkBlock());
+      page.blocks.push(newWorkBlock({ label: nextLabelForAppend() }));
     }
     for (const ws of restOfNewWs) {
       page.blocks.push(ws);
-      page.blocks.push(newWorkBlock());
+      page.blocks.push(newWorkBlock({ label: nextLabelForAppend() }));
     }
 
     // Activate the FIRST new section so split view jumps to it immediately
@@ -1411,7 +1551,39 @@ export async function mountEditor(root, notebookId) {
 
   async function addWorkBlock() {
     pushUndo();
-    page.blocks.push(newWorkBlock());
+    // Auto-increment the label from the LAST work block on the page so
+    // the kid's "+ תרגיל חדש" always lands on the next sensible number
+    // or Hebrew letter. We use page-order (not section-order) because
+    // labels reflect the worksheet's numbering scheme, not where on
+    // the page the kid happens to be — and the kid can always tap the
+    // chip and override if the worksheet skips ahead.
+    const workBlocks = page.blocks.filter((b) => b.type === BLOCK.WORK);
+    const prevLabel = workBlocks.length ? workBlocks[workBlocks.length - 1].label : '';
+    // If nextExerciseLabel can't make sense of the previous label (e.g.
+    // the kid typed "תרגיל א" or left it blank), fall back to the
+    // 1-based ordinal so the chip is never empty by surprise.
+    const computed = nextExerciseLabel(prevLabel);
+    const label = computed || String(workBlocks.length + 1);
+    const newBlock = newWorkBlock({ label });
+    // Insert the new exercise block right after the last block of the
+    // currently active section so the kid sees the new exercise next
+    // to where she was working. Falling back to page-append covers the
+    // edge case where computeSections is empty (no blocks on the page
+    // at all — shouldn't happen, but defensive).
+    const sections = computeSections();
+    const activeSection = sections[activeSectionIndex];
+    if (activeSection && activeSection.length > 0) {
+      const lastInSection = activeSection[activeSection.length - 1];
+      const insertAt = page.blocks.indexOf(lastInSection) + 1;
+      page.blocks.splice(insertAt, 0, newBlock);
+    } else {
+      page.blocks.push(newBlock);
+    }
+    activeWorkBlock = newBlock;
+    activeGridAnnot = null;
+    cursor.r = 0;
+    cursor.c = MARGIN_COLS;
+    cursor.slot = null;
     await savePage(page);
     await renderBlocks();
   }
@@ -1783,6 +1955,10 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode('english');
       return;
     }
+    // Exercise-label chip has focus — route presses into the contenteditable
+    // label rather than the work-block cells. Same pattern as annotations.
+    const labelEl = getFocusedExerciseLabel();
+    if (labelEl) return handleExerciseLabelKey(labelEl, code);
     // Annotation has focus — route presses to insert into the
     // contenteditable instead of the work-block grid. Newline maps to '\n'
     // (annotations support multi-line via white-space: pre-wrap).
@@ -1796,6 +1972,7 @@ export async function mountEditor(root, notebookId) {
       }
       return annotationInsert(annotEl, code);
     }
+    if (activeGridAnnot) return handleGridAnnotKey(code);
     if (!activeWorkBlock) return;
     switch (code) {
       case 'BACKSPACE': backspaceRTL(); return;
@@ -1827,6 +2004,8 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode('hebrew');
       return;
     }
+    const labelEl = getFocusedExerciseLabel();
+    if (labelEl) return handleExerciseLabelKey(labelEl, code);
     const annotEl = getFocusedAnnotation();
     if (annotEl) {
       if (code === 'BACKSPACE') return annotationBackspace(annotEl);
@@ -1836,6 +2015,7 @@ export async function mountEditor(root, notebookId) {
       }
       return annotationInsert(annotEl, code);
     }
+    if (activeGridAnnot) return handleGridAnnotKey(code);
     if (!activeWorkBlock) return;
     switch (code) {
       case 'BACKSPACE': backspace(); return;
@@ -1956,8 +2136,11 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode(lastAlphaMode);
       return;
     }
+    const labelEl = getFocusedExerciseLabel();
+    if (labelEl) return handleExerciseLabelKey(labelEl, code);
     const annotEl = getFocusedAnnotation();
     if (annotEl) return handleAnnotationMathKey(annotEl, code);
+    if (activeGridAnnot) return handleGridAnnotKey(code);
     if (!activeWorkBlock) return;
     if (CHAR_KEYS.has(code)) {
       insertChar(code);
@@ -2192,6 +2375,169 @@ export async function mountEditor(root, notebookId) {
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
+  }
+
+  // ---------- exercise-label keypad routing ----------
+  //
+  // The exercise label (".workblock__exercise-label") is a contenteditable
+  // chip that the kid taps to override the auto-numbered label. When it
+  // has focus we route the in-app keypad's presses into the chip the same
+  // way text annotations are driven — execCommand keeps the caret in
+  // sync and fires `input`, which triggers handleExerciseLabelEdit to
+  // persist the change.
+
+  function getFocusedExerciseLabel() {
+    const el = document.activeElement;
+    if (!el || !el.classList) return null;
+    if (!el.classList.contains('workblock__exercise-label')) return null;
+    return el;
+  }
+
+  function handleExerciseLabelKey(labelEl, code) {
+    if (code === 'EXIT' || code === 'NEWLINE') { labelEl.blur(); return; }
+    if (code === 'BACKSPACE') {
+      if (document.activeElement !== labelEl) labelEl.focus();
+      document.execCommand('delete', false, null);
+      return;
+    }
+    // Mode toggles bubble through the dispatcher above this; arrow keys,
+    // SPACE, and composite codes don't make sense inside the short label
+    // chip so we silently swallow them rather than emitting garbage text.
+    if (code === 'TOGGLE_KEYPAD' || code === 'TOGGLE_ENGLISH' || code === 'TOGGLE_HEBREW') return;
+    if (code === 'LEFT' || code === 'RIGHT' || code === 'UP' || code === 'DOWN') return;
+    if (code === 'SPACE') return;
+    // Anything that's a single character (digit, Hebrew letter, ASCII
+    // letter, operator) gets inserted at the caret. Composite codes
+    // (FRAC, POW, SQRT, …) are multi-character names and filtered out.
+    if (typeof code === 'string' && [...code].length === 1) {
+      if (document.activeElement !== labelEl) labelEl.focus();
+      document.execCommand('insertText', false, code);
+    }
+  }
+
+  // ---------- grid-annotation keypad routing ----------
+  //
+  // Counterpart to the work-block input handlers but scoped to whichever
+  // grid annotation is currently focused (activeGridAnnot). v1 is
+  // atom-only — single-character cells, no composites — because the
+  // primary use case is a short calculation under a printed worksheet
+  // question. Cell DOM is updated in-place via updateGridAnnotCellDOM /
+  // updateGridAnnotCursor so typing doesn't force a full renderBlocks
+  // every keystroke.
+
+  function handleGridAnnotKey(code) {
+    if (!activeGridAnnot) return;
+    const block = page.blocks.find((b) => b.id === activeGridAnnot.worksheetBlockId);
+    if (!block) { activeGridAnnot = null; return; }
+    const annot = (block.annotations || []).find((a) => a.id === activeGridAnnot.annotId);
+    if (!annot || !isGridAnnotation(annot)) { activeGridAnnot = null; return; }
+
+    if (code === 'EXIT') { activeGridAnnot = null; renderBlocks(); return; }
+    if (code === 'BACKSPACE') return gridAnnotBackspace(annot);
+    if (code === 'LEFT')  return gridAnnotMoveCursor(annot, 0, -1);
+    if (code === 'RIGHT') return gridAnnotMoveCursor(annot, 0, +1);
+    if (code === 'UP')    return gridAnnotMoveCursor(annot, -1, 0);
+    if (code === 'DOWN')  return gridAnnotMoveCursor(annot, +1, 0);
+    if (code === 'SPACE') return gridAnnotMoveCursor(annot, 0, +1);
+    if (code === 'NEWLINE') {
+      // ⏎: drop to the next row, column 0 — mirrors how the kid moves
+      // between steps in a worksheet calculation.
+      const { cursor: cur } = activeGridAnnot;
+      gridAnnotSetCursor(annot, Math.min(annot.rows - 1, cur.r + 1), 0);
+      return;
+    }
+    // Composite codes (FRAC, POW, …) and other unknowns are ignored in
+    // v1. Only single-character codes become atoms.
+    if (typeof code === 'string' && [...code].length === 1) {
+      return gridAnnotInsertChar(annot, code);
+    }
+  }
+
+  function gridAnnotInsertChar(annot, ch) {
+    pushUndo();
+    if (!annot.cells) annot.cells = {};
+    const cur = activeGridAnnot.cursor;
+    annot.cells[`${cur.r},${cur.c}`] = { ch };
+    updateGridAnnotCellDOM(annot.id, cur.r, cur.c, ch);
+    // Advance to the next cell. Wrap to the next row when we run off
+    // the right edge — keeps the kid moving forward without manual
+    // arrow taps for long calculations.
+    let nr = cur.r;
+    let nc = cur.c + 1;
+    if (nc >= annot.cols) {
+      if (cur.r + 1 < annot.rows) { nr = cur.r + 1; nc = 0; }
+      else nc = cur.c; // bottom-right corner: stay put, kid backspaces or resizes
+    }
+    gridAnnotSetCursor(annot, nr, nc);
+    queueSave();
+  }
+
+  function gridAnnotBackspace(annot) {
+    pushUndo();
+    if (!annot.cells) annot.cells = {};
+    const cur = activeGridAnnot.cursor;
+    const key = `${cur.r},${cur.c}`;
+    if (annot.cells[key]) {
+      delete annot.cells[key];
+      updateGridAnnotCellDOM(annot.id, cur.r, cur.c, '');
+      queueSave();
+      return;
+    }
+    // Empty cell — back up one and clear that.
+    if (cur.c > 0) {
+      gridAnnotSetCursor(annot, cur.r, cur.c - 1);
+      const prevKey = `${cur.r},${cur.c}`;
+      if (annot.cells[prevKey]) {
+        delete annot.cells[prevKey];
+        updateGridAnnotCellDOM(annot.id, cur.r, cur.c, '');
+        queueSave();
+      }
+    } else if (cur.r > 0) {
+      // Wrap up to the previous row's last column.
+      gridAnnotSetCursor(annot, cur.r - 1, annot.cols - 1);
+      const prevKey = `${cur.r},${cur.c}`;
+      if (annot.cells[prevKey]) {
+        delete annot.cells[prevKey];
+        updateGridAnnotCellDOM(annot.id, cur.r, cur.c, '');
+        queueSave();
+      }
+    }
+  }
+
+  function gridAnnotMoveCursor(annot, dr, dc) {
+    const cur = activeGridAnnot.cursor;
+    const nr = Math.max(0, Math.min(annot.rows - 1, cur.r + dr));
+    const nc = Math.max(0, Math.min(annot.cols - 1, cur.c + dc));
+    gridAnnotSetCursor(annot, nr, nc);
+  }
+
+  function gridAnnotSetCursor(annot, r, c) {
+    const cur = activeGridAnnot.cursor;
+    if (cur.r === r && cur.c === c) return;
+    const prev = { r: cur.r, c: cur.c };
+    cur.r = r;
+    cur.c = c;
+    updateGridAnnotCursorDOM(annot.id, prev, cur);
+  }
+
+  function updateGridAnnotCellDOM(annotId, r, c, text) {
+    const annotEl = document.querySelector(`.worksheet__annot--grid[data-annot-id="${annotId}"]`);
+    if (!annotEl) return;
+    const cellEl = annotEl.querySelector(`.gridannot__cell[data-r="${r}"][data-c="${c}"]`);
+    if (cellEl) cellEl.textContent = text;
+  }
+
+  function updateGridAnnotCursorDOM(annotId, prev, next) {
+    const annotEl = document.querySelector(`.worksheet__annot--grid[data-annot-id="${annotId}"]`);
+    if (!annotEl) return;
+    if (prev) {
+      const prevEl = annotEl.querySelector(`.gridannot__cell[data-r="${prev.r}"][data-c="${prev.c}"]`);
+      if (prevEl) prevEl.classList.remove('gridannot__cell--cursor');
+    }
+    if (next) {
+      const nextEl = annotEl.querySelector(`.gridannot__cell[data-r="${next.r}"][data-c="${next.c}"]`);
+      if (nextEl) nextEl.classList.add('gridannot__cell--cursor');
+    }
   }
 
   function getCellAt(r, c) {
@@ -2746,6 +3092,7 @@ export async function mountEditor(root, notebookId) {
     const { wrapper: newWrapper, grid: newGrid } = renderWorkBlock(activeWorkBlock, {
       cursor,
       onCellTap: (r, c) => moveCursor(r, c),
+      onLabelEdit: handleExerciseLabelEdit,
       onMovePart: (part, drow, dcol) =>
         movePartAndSave(activeWorkBlock, part, drow, dcol),
       onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined

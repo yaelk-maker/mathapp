@@ -20,14 +20,18 @@ export const COMPOSITE = Object.freeze({
   ABS: 'abs'
 });
 
-// 25 cols × 25 rows. Was 19×25, but Math QA found that the README's
-// headline distribution line — 6x−3(2x−3)>(x+4)−4(x−1), 23 atoms —
-// did NOT fit in the previous 17 writable columns (19 - 2 margin).
-// Bumping to 25 cols gives 23 writable columns, leaving exactly one
-// column of slack for the inequality. Notebooks created before this
-// change still load at their stored size; migrateWorkBlockSize only
-// shrinks (never grows), so existing kids' notebooks see no jump.
-export const DEFAULT_GRID = Object.freeze({ rows: 25, cols: 25 });
+// 25 cols × 4 rows. Cols: 25 leaves 23 writable columns (after the
+// MARGIN_COLS margin), enough for the README's headline distribution
+// line — 6x−3(2x−3)>(x+4)−4(x−1), 23 atoms. Rows: 4 is the per-exercise
+// default — each exercise now lives in its own block (see Exercise
+// labels below), and 4 rows is enough to lay out a typical solving
+// step without leaving a huge blank tail under the work. The kid can
+// still add rows via the toolbar's ➕↕ button or the corner ⤡ handle.
+// Notebooks created before this change still load at their stored
+// size; migrateWorkBlockSize only shrinks (never grows), and only when
+// the existing content already fits — so a kid with content past row 4
+// keeps their tall block.
+export const DEFAULT_GRID = Object.freeze({ rows: 4, cols: 25 });
 
 // Reserved "notebook margin" on the left of every work block. The first
 // MARGIN_COLS columns render with the same grid lines as the rest of the
@@ -45,16 +49,68 @@ function blockId() {
   return `b_${Date.now().toString(36)}_${_counter}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function newWorkBlock({ rows = DEFAULT_GRID.rows, cols = DEFAULT_GRID.cols } = {}) {
+export function newWorkBlock({
+  rows = DEFAULT_GRID.rows,
+  cols = DEFAULT_GRID.cols,
+  label = '1'
+} = {}) {
   return {
     type: BLOCK.WORK,
     id: blockId(),
     rows,
     cols,
+    // Exercise label rendered as "תרגיל <label>" above the grid. Editable
+    // by the kid (tap to focus, in-app keypad inserts) and auto-incremented
+    // by the editor when "+ תרגיל חדש" creates the next block. Empty string
+    // is allowed — the kid types it in fresh, or it's the result of
+    // nextExerciseLabel failing to recognise the previous label's pattern.
+    label,
     // Sparse map of "r,c" -> { ch: <single character> }.
     // Composite cells (fractions, etc.) added in Phase 5 will use a richer shape.
     cells: {}
   };
+}
+
+// Hebrew gematria letters in sequence — used to auto-increment exercise
+// labels like ה → ו, ה׳ → ו׳. Final forms (ך ם ן ף ץ) collapse to their
+// base letter before lookup so כ → ל still works even if the kid happens
+// to type a final form.
+const HEBREW_LETTERS = ['א','ב','ג','ד','ה','ו','ז','ח','ט','י','כ','ל','מ','נ','ס','ע','פ','צ','ק','ר','ש','ת'];
+const HEBREW_FINAL_TO_BASE = { 'ך': 'כ', 'ם': 'מ', 'ן': 'נ', 'ף': 'פ', 'ץ': 'צ' };
+
+// Given the previous exercise block's label, compute the next one. The
+// kid sets the first label on a page (e.g. "8" or "ה׳"); subsequent
+// "+ תרגיל חדש" presses auto-increment from there. Returns the new
+// label string, or '' when the previous label doesn't match a pattern
+// we know how to advance — the editor then leaves the chip empty for
+// the kid to fill in by hand rather than guessing wrong.
+//
+// Patterns handled:
+//   "8"   → "9"     (any non-negative integer)
+//   "ה"   → "ו"     (single Hebrew letter)
+//   "ה׳"  → "ו׳"    (Hebrew letter + geresh — geresh is preserved verbatim)
+//   "ה."  → "ו."    (any non-letter trailing chars are preserved)
+// Anything else (compound labels like "תרגיל 8", letter pairs like "יא",
+// past ת with no successor) returns '' so the kid sees an empty chip
+// and types the label themselves.
+export function nextExerciseLabel(prev) {
+  if (!prev) return '';
+  const trimmed = String(prev).trim();
+  if (!trimmed) return '';
+  if (/^\d+$/.test(trimmed)) {
+    return String(parseInt(trimmed, 10) + 1);
+  }
+  const m = trimmed.match(/^([א-ת])(.*)$/);
+  if (m) {
+    const letter = m[1];
+    const suffix = m[2];
+    const base = HEBREW_FINAL_TO_BASE[letter] || letter;
+    const idx = HEBREW_LETTERS.indexOf(base);
+    if (idx >= 0 && idx + 1 < HEBREW_LETTERS.length) {
+      return HEBREW_LETTERS[idx + 1] + suffix;
+    }
+  }
+  return '';
 }
 
 export function newWorksheetBlock({ blobId, naturalWidth, naturalHeight }) {
@@ -92,6 +148,39 @@ export function newAnnotation({
   text = ''
 } = {}) {
   return { id: annotationId(), x, y, w, fontSize, text };
+}
+
+// Grid annotation: a small work-grid that floats on a worksheet image so
+// the kid can do a calculation with the same cell alignment as the main
+// work area (one digit per cell). Storage shape mirrors a WorkBlock's
+// cells/rows/cols, but the annotation lives inside a worksheet block
+// rather than at the page level. The defaults are tuned for a short
+// scratch calculation under a typical worksheet exercise — wider than
+// a fraction needs but small enough to drop next to the printed
+// question without covering the worksheet text.
+export const GRID_ANNOTATION_DEFAULT = Object.freeze({ rows: 3, cols: 8 });
+export const GRID_ANNOTATION_MIN = Object.freeze({ rows: 1, cols: 2 });
+export const GRID_ANNOTATION_MAX = Object.freeze({ rows: 12, cols: 20 });
+
+export function newGridAnnotation({
+  x = 0.5,
+  y = 0.5,
+  w = 0.30,
+  rows = GRID_ANNOTATION_DEFAULT.rows,
+  cols = GRID_ANNOTATION_DEFAULT.cols
+} = {}) {
+  return {
+    id: annotationId(),
+    type: 'grid',
+    x, y, w,
+    rows,
+    cols,
+    cells: {}
+  };
+}
+
+export function isGridAnnotation(annot) {
+  return !!(annot && annot.type === 'grid');
 }
 
 export function getAnnotations(block) {

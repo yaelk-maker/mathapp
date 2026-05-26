@@ -13,7 +13,8 @@ import {
   getAnnotations,
   clampAnnotationFont,
   ANNOTATION_FONT_STEP_CQH,
-  DEFAULT_ANNOTATION_FONT_CQH
+  DEFAULT_ANNOTATION_FONT_CQH,
+  isGridAnnotation
 } from '../page-model.js';
 
 const urlCache = new Map(); // blobId -> objectURL
@@ -72,7 +73,13 @@ export async function renderWorksheetBlock(block, options = {}) {
     overlay.appendChild(buildAnnotationEl(annot, block, options));
   }
 
-  if (options.annotateMode) wrapper.classList.add('worksheet--annotate');
+  if (options.annotateMode) {
+    wrapper.classList.add('worksheet--annotate');
+    // The annotate-kind class lets CSS show which mode the kid is in
+    // (text vs grid), and lets the create-on-tap binding read it back
+    // out without having to thread the kind through every callback.
+    wrapper.classList.add(`worksheet--annotate-${options.annotateMode}`);
+  }
 
   // Tap on empty overlay (annotate mode only) creates a new annotation at
   // that spot. We bind on pointerup with a tap heuristic so a drag-to-scroll
@@ -126,6 +133,12 @@ export function revokeBlobUrl(blobId) {
 // --- Annotation rendering & interaction ------------------------------------
 
 function buildAnnotationEl(annot, block, options) {
+  // Grid annotations render as a small WorkBlock-style grid floating on
+  // the worksheet image. Cell layout, cursor styling and tap handling
+  // are independent of the contenteditable text-annotation path below.
+  if (isGridAnnotation(annot)) {
+    return buildGridAnnotationEl(annot, block, options);
+  }
   const el = document.createElement('div');
   el.className = 'worksheet__annot';
   el.dataset.annotId = annot.id;
@@ -329,6 +342,259 @@ function bindAnnotationInteractions(el, annot, block, options) {
       e.stopPropagation();
     }
   });
+}
+
+// --- Grid annotation rendering --------------------------------------------
+//
+// A grid annotation is a small WorkBlock-shaped overlay positioned on the
+// worksheet image. Same cell mechanics as the main work area (sparse
+// "r,c" -> { ch } map), but stripped down for v1: atoms only, no
+// composites, no left margin. The kid taps a cell to focus it; the
+// editor.js keypad handlers then route presses into that cell.
+
+function buildGridAnnotationEl(annot, block, options) {
+  const el = document.createElement('div');
+  el.className = 'worksheet__annot worksheet__annot--grid';
+  el.dataset.annotId = annot.id;
+  el.dataset.annotType = 'grid';
+  // dir="ltr" so digit flow inside cells reads left-to-right even when
+  // the surrounding page is RTL — same convention as the main workblock.
+  el.setAttribute('dir', 'ltr');
+  el.style.left = `${(annot.x * 100).toFixed(3)}%`;
+  el.style.top = `${(annot.y * 100).toFixed(3)}%`;
+  el.style.width = `${(annot.w * 100).toFixed(3)}%`;
+
+  const grid = document.createElement('div');
+  grid.className = 'gridannot__grid';
+  grid.style.setProperty('--rows', annot.rows);
+  grid.style.setProperty('--cols', annot.cols);
+
+  const focus = options.focusedGridAnnot;
+  const isFocused = focus && focus.annotId === annot.id;
+
+  for (let r = 0; r < annot.rows; r += 1) {
+    for (let c = 0; c < annot.cols; c += 1) {
+      const cellEl = document.createElement('div');
+      cellEl.className = 'gridannot__cell';
+      cellEl.dataset.r = r;
+      cellEl.dataset.c = c;
+      const cell = annot.cells && annot.cells[`${r},${c}`];
+      if (cell && cell.ch != null) cellEl.textContent = cell.ch;
+      if (isFocused && focus.r === r && focus.c === c) {
+        cellEl.classList.add('gridannot__cell--cursor');
+      }
+      grid.appendChild(cellEl);
+    }
+  }
+
+  grid.addEventListener('click', (e) => {
+    const cellEl = e.target.closest('.gridannot__cell');
+    if (!cellEl) return;
+    if (options.onGridAnnotCellTap) {
+      options.onGridAnnotCellTap(
+        block.id,
+        annot.id,
+        Number(cellEl.dataset.r),
+        Number(cellEl.dataset.c)
+      );
+    }
+  });
+
+  el.appendChild(grid);
+
+  bindGridAnnotationInteractions(el, annot, block, options);
+  return el;
+}
+
+function bindGridAnnotationInteractions(el, annot, block, options) {
+  // Tracks whether the kid has actually placed any digit in this grid.
+  // Same idea as the text-annotation everTyped flag — an empty grid that
+  // was created by a stray tap and never typed into is cleaned up so the
+  // worksheet doesn't accumulate ghost grid placeholders.
+  const isEmptyGrid = () => !annot.cells || Object.keys(annot.cells).length === 0;
+  let everTyped = !isEmptyGrid();
+  // The focused cell tap path is the canonical "the kid is using this
+  // annotation" signal — once any cell has been tapped (even before
+  // typing), don't auto-delete on blur. Without this, focusing an
+  // empty grid to start typing wouldn't survive the focus pass that
+  // re-renders.
+  if (options.onGridAnnotFocus) {
+    el.addEventListener(
+      'pointerdown',
+      () => { everTyped = everTyped || true; },
+      true
+    );
+  }
+
+  // Long-press anywhere on the grid wrapper (but NOT on a cell — cell
+  // taps focus the cell for typing) enters manipulate mode. Same gesture
+  // and timing as text annotations so the kid's muscle memory carries
+  // over. The press lands on the wrapper's padding/border because we
+  // mark cell taps with stopPropagation in the grid click handler above
+  // is NOT enough — pointerdown still bubbles. We check the target
+  // explicitly to ignore cell-originating presses.
+  let pressTimer = null;
+  let startX = 0, startY = 0;
+  let pointerId = null;
+
+  const cancelPress = () => {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+  };
+
+  el.addEventListener('pointerdown', (e) => {
+    if (el.classList.contains('worksheet__annot--manipulate')) return;
+    if (pointerId !== null) return;
+    // A press that starts on a cell is a tap-to-focus, not a manipulate
+    // gesture. The cell's click handler will fire on pointerup.
+    if (e.target.closest('.gridannot__cell')) return;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startY = e.clientY;
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      enterGridManipulateMode(el, annot, block, options);
+    }, LONGPRESS_MS);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pointerId) return;
+    if (Math.hypot(e.clientX - startX, e.clientY - startY) > LONGPRESS_SLOP_PX) {
+      cancelPress();
+    }
+  });
+  const endPress = (e) => {
+    if (e && e.pointerId !== pointerId) return;
+    pointerId = null;
+    cancelPress();
+  };
+  el.addEventListener('pointerup', endPress);
+  el.addEventListener('pointercancel', endPress);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // Manipulate-mode badge — same UX as text annotations so a tap-only
+  // path exists for kids who can't reliably long-press. The badge sits
+  // above the grid; tapping it opens the manipulate chrome.
+  let manipulateBadge = null;
+  const removeManipulateBadge = () => {
+    if (manipulateBadge) { manipulateBadge.remove(); manipulateBadge = null; }
+  };
+  const showManipulateBadge = () => {
+    removeManipulateBadge();
+    const overlay = el.closest('.worksheet__overlay');
+    if (!overlay) return;
+    manipulateBadge = document.createElement('button');
+    manipulateBadge.type = 'button';
+    manipulateBadge.className = 'worksheet__annot-manipulate-badge';
+    manipulateBadge.textContent = '⋯';
+    manipulateBadge.title = 'הזיזי / שני גודל / מחקי';
+    manipulateBadge.setAttribute('aria-label', 'אפשרויות (הזזה, שינוי גודל, מחיקה)');
+    manipulateBadge.style.left = `${(annot.x * 100).toFixed(3)}%`;
+    manipulateBadge.style.top = `calc(${(annot.y * 100).toFixed(3)}% - 50px)`;
+    manipulateBadge.addEventListener('mousedown', (e) => e.preventDefault());
+    manipulateBadge.addEventListener('pointerdown', (e) => e.stopPropagation());
+    manipulateBadge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeManipulateBadge();
+      enterGridManipulateMode(el, annot, block, options);
+    });
+    overlay.appendChild(manipulateBadge);
+  };
+  // Surface the badge when this grid is the focused one. Editor sets
+  // focusedGridAnnot.annotId before calling renderBlocks, so on the
+  // next paint the focused grid arrives here with isFocused = true.
+  if (options.focusedGridAnnot && options.focusedGridAnnot.annotId === annot.id) {
+    requestAnimationFrame(showManipulateBadge);
+  }
+}
+
+function enterGridManipulateMode(el, annot, block, options) {
+  if (el.classList.contains('worksheet__annot--manipulate')) return;
+  el.classList.add('worksheet__annot--manipulate');
+
+  if (options.onAnnotationManipulateStart) {
+    options.onAnnotationManipulateStart(block.id, annot.id);
+  }
+
+  const overlay = el.closest('.worksheet__overlay');
+  const chrome = buildGridManipulateChrome(el, annot, block, options, exitManipulateMode);
+  el.appendChild(chrome);
+
+  // Flip chrome below the grid when there isn't enough room above.
+  const rect = el.getBoundingClientRect();
+  const CHROME_HEIGHT_PX = 60;
+  if (rect.top < CHROME_HEIGHT_PX) {
+    chrome.classList.add('worksheet__annot-chrome--flip-below');
+  }
+
+  const handle = document.createElement('div');
+  handle.className = 'worksheet__annot-resize';
+  handle.setAttribute('aria-hidden', 'true');
+  el.appendChild(handle);
+
+  bindDrag(el, annot, block, overlay, options);
+  bindResize(handle, el, annot, block, overlay, options);
+
+  function exitManipulateMode() {
+    el.classList.remove('worksheet__annot--manipulate');
+    chrome.remove();
+    handle.remove();
+    document.removeEventListener('pointerdown', onOutside, true);
+  }
+  const onOutside = (e) => {
+    if (el.contains(e.target)) return;
+    exitManipulateMode();
+  };
+  setTimeout(() => document.addEventListener('pointerdown', onOutside, true), 0);
+}
+
+function buildGridManipulateChrome(el, annot, block, options, exit) {
+  const chrome = document.createElement('div');
+  chrome.className = 'worksheet__annot-chrome';
+
+  const mkBtn = (label, title, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'worksheet__annot-btn';
+    b.textContent = label;
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onClick();
+    });
+    return b;
+  };
+
+  // Per-grid row/column adjustment. We re-render the whole worksheet
+  // via onAnnotationChanged + a save — cheap because grids are small
+  // and the kid is in manipulate mode, not mid-typing.
+  const changeShape = (drow, dcol) => {
+    const newRows = Math.max(1, Math.min(12, annot.rows + drow));
+    const newCols = Math.max(2, Math.min(20, annot.cols + dcol));
+    if (newRows === annot.rows && newCols === annot.cols) return;
+    // Drop any cells that no longer fit so the data doesn't grow stale.
+    if (newRows < annot.rows || newCols < annot.cols) {
+      const kept = {};
+      for (const [k, cell] of Object.entries(annot.cells || {})) {
+        const [r, c] = k.split(',').map(Number);
+        if (r < newRows && c < newCols) kept[k] = cell;
+      }
+      annot.cells = kept;
+    }
+    annot.rows = newRows;
+    annot.cols = newCols;
+    if (options.onAnnotationChanged) options.onAnnotationChanged(block.id);
+  };
+
+  chrome.appendChild(mkBtn('+שורה', 'הוספת שורה', () => changeShape(+1, 0)));
+  chrome.appendChild(mkBtn('−שורה', 'מחיקת שורה', () => changeShape(-1, 0)));
+  chrome.appendChild(mkBtn('+עמודה', 'הוספת עמודה', () => changeShape(0, +1)));
+  chrome.appendChild(mkBtn('−עמודה', 'מחיקת עמודה', () => changeShape(0, -1)));
+  chrome.appendChild(mkBtn('🗑', 'מחיקה', () => {
+    if (options.onDeleteAnnotation) options.onDeleteAnnotation(block.id, annot.id);
+  }));
+  chrome.appendChild(mkBtn('✓', 'סיום', () => exit()));
+  return chrome;
 }
 
 // --- Manipulate mode (move / resize / font / delete) ----------------------
@@ -543,11 +809,23 @@ function bindCreateOnTap(overlay, block, options) {
     if (indicator) { indicator.remove(); indicator = null; }
   };
 
+  // Read the current annotate kind off the worksheet element. The
+  // editor sets `worksheet--annotate-text` or `worksheet--annotate-grid`
+  // when its corresponding mode is active; the bare `worksheet--annotate`
+  // class is the "in some annotate mode" gate.
+  const currentAnnotateKind = () => {
+    const ws = overlay.closest('.worksheet');
+    if (!ws) return null;
+    if (ws.classList.contains('worksheet--annotate-grid')) return 'grid';
+    if (ws.classList.contains('worksheet--annotate-text')) return 'text';
+    return null;
+  };
+
   // pointerdown/up tracking for tap detection
   let downX = 0, downY = 0, downTime = 0, pid = null;
 
   overlay.addEventListener('pointerdown', (e) => {
-    if (!overlay.closest('.worksheet').classList.contains('worksheet--annotate')) return;
+    if (!currentAnnotateKind()) return;
     if (e.target.closest('.worksheet__annot')) return;
     pid = e.pointerId;
     downX = e.clientX;
@@ -559,7 +837,8 @@ function bindCreateOnTap(overlay, block, options) {
     if (e.pointerId !== pid) return;
     pid = null;
     if (e.target.closest('.worksheet__annot')) return;
-    if (!overlay.closest('.worksheet').classList.contains('worksheet--annotate')) return;
+    const kind = currentAnnotateKind();
+    if (!kind) return;
     const dt = performance.now() - downTime;
     const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
     // Tap heuristic: short hold, no drift.
@@ -585,7 +864,7 @@ function bindCreateOnTap(overlay, block, options) {
       const yFrac = clamp01(lastTap.y / rect.height);
       removeIndicator();
       lastTap = null;
-      options.onCreateAnnotation(block.id, xFrac, yFrac);
+      options.onCreateAnnotation(block.id, xFrac, yFrac, kind);
       return;
     }
 
@@ -606,9 +885,10 @@ function bindCreateOnTap(overlay, block, options) {
       if (r.width === 0 || r.height === 0) return;
       const xFrac = clamp01(lastTap.x / r.width);
       const yFrac = clamp01(lastTap.y / r.height);
+      const kind = currentAnnotateKind() || 'grid';
       removeIndicator();
       lastTap = null;
-      options.onCreateAnnotation(block.id, xFrac, yFrac);
+      options.onCreateAnnotation(block.id, xFrac, yFrac, kind);
     });
     overlay.appendChild(indicator);
     // Auto-remove after the double-tap window expires so a forgotten
