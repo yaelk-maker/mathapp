@@ -31,7 +31,7 @@ const LETTER_ROWS = [
   ['z', 'x', 'c', 'v', 'b', 'n', 'm']
 ];
 
-const PUNCTUATION = ['!', ':', '.', '/', '(', ')'];
+const PUNCTUATION = ['!', ':', '.', ',', '/', '(', ')'];
 
 // Shift state machine. Tapping the shift key advances through the cycle:
 // off → shift (single uppercase, drops back after the next letter) → locked

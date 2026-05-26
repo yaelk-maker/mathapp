@@ -407,28 +407,98 @@ function buildGridAnnotationEl(annot, block, options) {
 
   el.appendChild(grid);
 
-  // Persistent "⋯" menu button in the corner — opens manipulate mode
-  // (drag / resize / row+col / delete) on a single tap, no long-press
-  // required. The text-annotation flow uses a focus-only badge in the
-  // overlay; grid annotations get this always-visible button instead
-  // because the wrapper border is too thin a long-press target and
-  // the kid asked for an easier way to operate the calculation pad.
+  // Persistent "⋯" handle at the corner. It's the always-available
+  // drag handle for the grid: press and drag → moves the annotation;
+  // tap without movement → opens manipulate mode (resize / row+col /
+  // delete). The kid's screenshot showed she was trying to drag from
+  // the dots directly, so we wire both gestures onto the same button.
   const menuBtn = document.createElement('button');
   menuBtn.type = 'button';
   menuBtn.className = 'gridannot__menu';
-  menuBtn.textContent = '⋯';
-  menuBtn.title = 'הזיזי / שני גודל / מחקי';
-  menuBtn.setAttribute('aria-label', 'אפשרויות (הזזה, שינוי גודל, מחיקה)');
+  menuBtn.textContent = '⋮⋮';
+  menuBtn.title = 'גרור כדי להזיז · הקש כדי לפתוח אפשרויות';
+  menuBtn.setAttribute('aria-label', 'גרור כדי להזיז, הקש כדי לפתוח אפשרויות');
   menuBtn.addEventListener('mousedown', (e) => e.preventDefault());
-  menuBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-  menuBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    enterGridManipulateMode(el, annot, block, options);
-  });
+  bindGridAnnotHandle(menuBtn, el, annot, block, options);
   el.appendChild(menuBtn);
 
   bindGridAnnotationInteractions(el, annot, block, options);
   return el;
+}
+
+// Drag-or-tap binding on the corner "⋮⋮" handle.
+//   - pointerdown starts a tentative drag.
+//   - pointermove > slop threshold → committed drag, update annot.x/y
+//     and reposition the wrapper inline as the kid moves.
+//   - pointerup with no drift → tap, open manipulate mode.
+//   - pointerup after a drag → persist and fire onAnnotationChanged.
+// We don't enter manipulate mode for drags — the kid is just
+// repositioning, no reason to also flip them into resize mode.
+function bindGridAnnotHandle(handleEl, el, annot, block, options) {
+  let pointerId = null;
+  let startClientX = 0, startClientY = 0;
+  let startAnnotX = 0, startAnnotY = 0;
+  let moved = false;
+  const SLOP = 5;
+
+  handleEl.addEventListener('pointerdown', (e) => {
+    if (pointerId !== null) return;
+    pointerId = e.pointerId;
+    startClientX = e.clientX;
+    startClientY = e.clientY;
+    startAnnotX = annot.x;
+    startAnnotY = annot.y;
+    moved = false;
+    try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
+    e.stopPropagation();
+  });
+
+  handleEl.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pointerId) return;
+    const dx = e.clientX - startClientX;
+    const dy = e.clientY - startClientY;
+    if (!moved && Math.hypot(dx, dy) < SLOP) return;
+    moved = true;
+    const overlay = el.closest('.worksheet__overlay');
+    if (!overlay) return;
+    const rect = overlay.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    annot.x = clamp01(startAnnotX + dx / rect.width);
+    annot.y = clamp01(startAnnotY + dy / rect.height);
+    el.style.left = `${(annot.x * 100).toFixed(3)}%`;
+    el.style.top = `${(annot.y * 100).toFixed(3)}%`;
+  });
+
+  const endDrag = (e) => {
+    if (e.pointerId !== pointerId) return;
+    pointerId = null;
+    try { handleEl.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (moved) {
+      // Push an undo snapshot at the END of the drag (cheap once-per-
+      // gesture instead of every move) and persist the new position.
+      if (options.onAnnotationManipulateStart) {
+        options.onAnnotationManipulateStart(block.id, annot.id);
+      }
+      if (options.onAnnotationChanged) {
+        options.onAnnotationChanged(block.id);
+      }
+    }
+  };
+  handleEl.addEventListener('pointerup', endDrag);
+  handleEl.addEventListener('pointercancel', endDrag);
+
+  // Click fires after pointerup. If the kid didn't drag (moved=false),
+  // treat it as a tap that opens manipulate mode. If they dragged,
+  // swallow the click so manipulate mode doesn't pop up at the end of
+  // every drag.
+  handleEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (moved) {
+      moved = false;
+      return;
+    }
+    enterGridManipulateMode(el, annot, block, options);
+  });
 }
 
 function bindGridAnnotationInteractions(el, annot, block, options) {
