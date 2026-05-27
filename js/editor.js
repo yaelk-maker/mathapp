@@ -282,8 +282,8 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↺ <span class="label">ביטול</span></button>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת קובץ" title="צילום, תמונה או PDF">📷 <span class="label">דף</span></button>
-          <button class="btn btn--ghost" id="toggle-annotate-grid" aria-label="חישוב על דף" title="חישוב על דף — תיבת חישוב עם משבצות">🔢 <span class="label">חישוב על דף</span></button>
-          <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — תיבת טקסט חופשי">📝 <span class="label">טקסט על דף</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-grid" aria-label="חישוב על דף" title="חישוב על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת חישוב">🔢 <span class="label">חישוב על דף</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת טקסט">📝 <span class="label">טקסט על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
           <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
@@ -368,13 +368,15 @@ export async function mountEditor(root, notebookId) {
   );
   document.getElementById('add-work').addEventListener('click', () => addWorkBlock());
 
-  // Annotate-mode toggles — one for grid (חישוב על דף), one for text
-  // (טקסט על דף). The two kinds are mutually exclusive with each other
-  // AND with pen mode (the pencil canvas claims pointer events when
-  // active, which would swallow taps meant for creating annotations).
-  // Grid is the default mode the kid reaches for calculations under a
-  // printed worksheet question; text remains available for free-form
-  // notes.
+  // "Add a box on the page" buttons — one for a calculation grid
+  // (חישוב על דף), one for free text (טקסט על דף). Both share ONE
+  // creation method: press the button to arm, then tap once on the
+  // worksheet to drop a single box where you tapped. The box auto-disarms
+  // after that one tap (see createAnnotation), so brushing the page never
+  // spawns extra boxes — the kid presses the button again for each new
+  // box. The two kinds are mutually exclusive with each other AND with
+  // pen mode (the pencil canvas claims pointer events while active, which
+  // would swallow the placement tap).
   const annotateGridBtn = document.getElementById('toggle-annotate-grid');
   const annotateTextBtn = document.getElementById('toggle-annotate-text');
   function setAnnotateKind(kind) {
@@ -386,7 +388,24 @@ export async function mountEditor(root, notebookId) {
       // toggle is more recent intent than the still-active pen state.
       setPencilEnabled(false);
     }
+    if (kind) {
+      toast(
+        kind === 'grid'
+          ? 'הקישי על הדף במקום שבו תרצי את תיבת החישוב'
+          : 'הקישי על הדף במקום שבו תרצי את תיבת הטקסט',
+        { kind: 'info' }
+      );
+    }
     renderBlocks();
+  }
+  // Leave armed mode without re-rendering — createAnnotation calls this the
+  // moment a box lands so the very next tap on the worksheet doesn't drop a
+  // second box. The render that follows the placement clears the crosshair.
+  function disarmAnnotate() {
+    if (!annotateKind) return;
+    annotateKind = null;
+    annotateGridBtn.classList.remove('btn--active');
+    annotateTextBtn.classList.remove('btn--active');
   }
   annotateGridBtn.addEventListener('click', () => {
     setAnnotateKind(annotateKind === 'grid' ? null : 'grid');
@@ -1312,6 +1331,11 @@ export async function mountEditor(root, notebookId) {
   async function createAnnotation(blockId, xFrac, yFrac, kind = 'grid') {
     const block = page.blocks.find((b) => b.id === blockId);
     if (!block || block.type !== BLOCK.WORKSHEET) return;
+    // One-shot placement: a single tap drops one box and immediately leaves
+    // armed mode, so the next tap on the worksheet (or an accidental brush)
+    // doesn't spawn another. The re-render triggered below sheds the
+    // crosshair/annotate class once annotateKind is cleared.
+    disarmAnnotate();
     pushUndo();
     if (!Array.isArray(block.annotations)) block.annotations = [];
     let annot;
