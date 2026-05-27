@@ -827,31 +827,22 @@ function bindResize(handle, el, annot, block, overlay, options) {
 
 // --- Creating annotations by tapping the overlay --------------------------
 //
-// Creation requires a DOUBLE-TAP, not a single tap. The accessibility
-// audit flagged single-tap-create as the source of "ghost annotations
-// everywhere" — a kid with tremors brushes the worksheet and gets
-// permanent placeholders. Double-tap is a deliberate gesture; single
-// taps just position a (transient) "+" indicator at the spot so the kid
-// knows where the next tap will land. The indicator also acts as the
-// "second tap" target — tapping it again confirms the creation.
-
-const DOUBLETAP_WINDOW_MS = 500;
-const DOUBLETAP_MAX_DRIFT_PX = 24;
+// Both box kinds (calculation grid and free text) share ONE creation
+// method: the kid arms a kind via the toolbar button, then a SINGLE
+// deliberate tap on the worksheet drops one box where she tapped. The
+// editor disarms the mode the instant a box lands (see createAnnotation),
+// so the overlay only listens for that one placement tap — brushing the
+// page when nothing is armed can't spawn a box, and a second tap after
+// placement doesn't either. That replaces the old split where grids
+// created on every single tap (too sensitive) and text needed a fiddly
+// double-tap (too hard); the two are now identical.
 
 function bindCreateOnTap(overlay, block, options) {
   if (!options.onCreateAnnotation) return;
 
-  let lastTap = null; // { x, y, t } for double-tap detection
-  let indicator = null; // floating "+" element
-
-  const removeIndicator = () => {
-    if (indicator) { indicator.remove(); indicator = null; }
-  };
-
-  // Read the current annotate kind off the worksheet element. The
-  // editor sets `worksheet--annotate-text` or `worksheet--annotate-grid`
-  // when its corresponding mode is active; the bare `worksheet--annotate`
-  // class is the "in some annotate mode" gate.
+  // Read the armed kind off the worksheet element. The editor sets
+  // `worksheet--annotate-grid` / `worksheet--annotate-text` while a kind
+  // is armed; the bare `worksheet--annotate` class is the "armed" gate.
   const currentAnnotateKind = () => {
     const ws = overlay.closest('.worksheet');
     if (!ws) return null;
@@ -880,78 +871,15 @@ function bindCreateOnTap(overlay, block, options) {
     if (!kind) return;
     const dt = performance.now() - downTime;
     const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
-    // Tap heuristic: short hold, no drift.
-    if (dt > 600 || dist > LONGPRESS_SLOP_PX) {
-      lastTap = null;
-      removeIndicator();
-      return;
-    }
+    // Tap heuristic: short hold, no drift — a scroll/drag must not place a
+    // box even while armed.
+    if (dt > 600 || dist > LONGPRESS_SLOP_PX) return;
 
     const rect = overlay.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const now = performance.now();
-
-    // Grid annotations create on a SINGLE deliberate tap — accidental
-    // ghost grids are obvious (visible cell box) and easy to delete via
-    // the 🗑 chrome button, so the double-tap protection that text
-    // annotations need (to avoid invisible empty contenteditables) is
-    // overkill for grids. Text annotations keep the double-tap flow.
-    if (kind === 'grid') {
-      const xFrac = clamp01(x / rect.width);
-      const yFrac = clamp01(y / rect.height);
-      lastTap = null;
-      removeIndicator();
-      options.onCreateAnnotation(block.id, xFrac, yFrac, kind);
-      return;
-    }
-
-    // Second tap within the double-tap window AND near the first tap →
-    // confirm creation at the FIRST-tap position (so the kid's two taps
-    // can be slightly off without scrolling the annotation).
-    if (lastTap &&
-        now - lastTap.t <= DOUBLETAP_WINDOW_MS &&
-        Math.hypot(x - lastTap.x, y - lastTap.y) <= DOUBLETAP_MAX_DRIFT_PX) {
-      const xFrac = clamp01(lastTap.x / rect.width);
-      const yFrac = clamp01(lastTap.y / rect.height);
-      removeIndicator();
-      lastTap = null;
-      options.onCreateAnnotation(block.id, xFrac, yFrac, kind);
-      return;
-    }
-
-    // First tap: drop a "+" indicator. Tapping it again (or anywhere
-    // close to it within DOUBLETAP_WINDOW_MS) commits the creation.
-    lastTap = { x, y, t: now };
-    removeIndicator();
-    indicator = document.createElement('div');
-    indicator.className = 'worksheet__annot-pending';
-    indicator.textContent = '＋';
-    indicator.title = 'הקישי שוב כדי להוסיף תיבת טקסט';
-    indicator.style.left = `${(x / rect.width * 100).toFixed(2)}%`;
-    indicator.style.top = `${(y / rect.height * 100).toFixed(2)}%`;
-    indicator.addEventListener('pointerdown', (ev) => ev.stopPropagation());
-    indicator.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      const r = overlay.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) return;
-      const xFrac = clamp01(lastTap.x / r.width);
-      const yFrac = clamp01(lastTap.y / r.height);
-      const kind = currentAnnotateKind() || 'grid';
-      removeIndicator();
-      lastTap = null;
-      options.onCreateAnnotation(block.id, xFrac, yFrac, kind);
-    });
-    overlay.appendChild(indicator);
-    // Auto-remove after the double-tap window expires so a forgotten
-    // pending indicator doesn't sit on the worksheet forever.
-    setTimeout(() => {
-      if (indicator && lastTap && (performance.now() - lastTap.t) >= DOUBLETAP_WINDOW_MS) {
-        removeIndicator();
-        lastTap = null;
-      }
-    }, DOUBLETAP_WINDOW_MS + 30);
+    const xFrac = clamp01((e.clientX - rect.left) / rect.width);
+    const yFrac = clamp01((e.clientY - rect.top) / rect.height);
+    options.onCreateAnnotation(block.id, xFrac, yFrac, kind);
   });
 }
 

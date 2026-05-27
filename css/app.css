@@ -934,6 +934,14 @@ h1 {
   bottom: calc(100% + 6px);
   right: 0;
   display: flex;
+  /* The grid menu carries six controls (+/− row, +/− column, delete,
+     done) — wider than a small calculation box. Wrap them onto a second
+     row instead of letting +שורה run off the side and sit unreachable
+     under the corner handle / page edge. The bar is bottom-anchored, so
+     wrapped rows grow upward and stay clear of the grid itself. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: min(264px, 86vw);
   gap: 4px;
   background: #111;
   color: white;
@@ -945,7 +953,7 @@ h1 {
   font-size: 0.875rem;
   font-family: inherit;
   direction: ltr;
-  z-index: 2;
+  z-index: 4;
 }
 .worksheet__annot-chrome--flip-below {
   bottom: auto;
@@ -1000,36 +1008,6 @@ h1 {
   border: 2px solid white;
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-}
-
-/* "+" floating target that appears after the first tap in annotate mode.
-   The kid taps it again (or any nearby spot within 500ms) to confirm
-   creation — accessibility audit said single-tap-create accumulates
-   ghost annotations on every tremor. */
-.worksheet__annot-pending {
-  position: absolute;
-  /* Anchor the visual center at the tapped point. */
-  transform: translate(50%, -50%);
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--accent);
-  color: white;
-  border-radius: 50%;
-  font-size: 1.5rem;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  pointer-events: auto;
-  z-index: 3;
-  cursor: pointer;
-  animation: annotPendingPulse 1.4s ease-in-out infinite;
-}
-@keyframes annotPendingPulse {
-  0%, 100% { box-shadow: 0 2px 8px rgba(11, 108, 242, 0.5); transform: translate(50%, -50%) scale(1); }
-  50%      { box-shadow: 0 2px 14px rgba(11, 108, 242, 0.7); transform: translate(50%, -50%) scale(1.08); }
 }
 
 /* Tap-only "manipulate" badge — appears on the focused annotation so a
@@ -1164,6 +1142,12 @@ h1 {
 .gridannot__menu:active {
   cursor: grabbing;
   background: var(--accent-pressed);
+}
+/* While the edit menu is open the corner handle has done its job (it's the
+   way INTO the menu). Hide it so it can't overlap the +שורה / +עמודה
+   controls — the kid reported the row buttons sitting hidden behind it. */
+.worksheet__annot--grid.worksheet__annot--manipulate .gridannot__menu {
+  display: none;
 }
 
 /* Section pager bar — sits above the page area, centered. Only visible
