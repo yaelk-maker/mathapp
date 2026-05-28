@@ -494,6 +494,18 @@ h1 {
   border-color: var(--accent);
 }
 
+/* Brief pulse to draw the kid's eye to the 📄 PDF button when she lands
+   in the editor via the home-screen PDF shortcut. iOS Safari blocks a
+   programmatic window.print() call after the navigation (no user
+   activation), so we point at the button instead of clicking for her. */
+.btn--pulse {
+  animation: btnPulse 800ms ease-in-out 4;
+}
+@keyframes btnPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(11, 108, 242, 0); }
+  50% { box-shadow: 0 0 0 6px rgba(11, 108, 242, 0.35); }
+}
+
 .pen-tools {
   display: inline-flex;
   align-items: center;
