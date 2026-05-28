@@ -494,10 +494,11 @@ h1 {
   border-color: var(--accent);
 }
 
-/* Brief pulse to draw the kid's eye to the 📄 PDF button when she lands
-   in the editor via the home-screen PDF shortcut. iOS Safari blocks a
-   programmatic window.print() call after the navigation (no user
-   activation), so we point at the button instead of clicking for her. */
+/* Brief pulse to draw the kid's eye to the 🖨️ הדפסה button (which also
+   saves as PDF) when she lands in the editor via the home-screen PDF
+   shortcut. iOS Safari blocks a programmatic window.print() call after the
+   navigation (no user activation), so we point at the button instead of
+   clicking for her. */
 .btn--pulse {
   animation: btnPulse 800ms ease-in-out 4;
 }
@@ -513,6 +514,16 @@ h1 {
   flex-wrap: wrap;
 }
 .pen-tools[hidden] { display: none; }
+
+/* Row/column controls, revealed behind the "שורות ועמודות" button so they
+   don't take up permanent space in the toolbar. */
+.grid-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.grid-tools[hidden] { display: none; }
 
 .pen-color {
   width: 44px;

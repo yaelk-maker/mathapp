@@ -14,7 +14,8 @@ export function attachPencilSurface(canvas, options) {
     allowFinger = false,
     getColor = () => '#111111',
     getWidth = () => 2.4,
-    getEraserMode = () => false
+    getEraserMode = () => false,
+    getHighlighter = () => false
   } = options;
 
   // Critical for iPadOS: prevents the page from scrolling when the Pencil
@@ -38,6 +39,7 @@ export function attachPencilSurface(canvas, options) {
       color: getColor(),
       width: getWidth(),
       eraser: getEraserMode(),
+      highlighter: getHighlighter(),
       pointerType: event.pointerType,
       point
     });

@@ -31,15 +31,26 @@ export function clearCanvas(canvas) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
+// Alpha for marker / highlighter strokes — low enough that the math or
+// worksheet text underneath stays readable through the colour.
+const HIGHLIGHTER_ALPHA = 0.32;
+
 function strokeStyle(ctx, stroke) {
   if (stroke.eraser) {
     ctx.globalCompositeOperation = 'destination-out';
     ctx.strokeStyle = '#000';
     ctx.fillStyle = '#000';
+    ctx.globalAlpha = 1;
+  } else if (stroke.highlighter) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = stroke.color || '#e6a700';
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.globalAlpha = HIGHLIGHTER_ALPHA;
   } else {
     ctx.globalCompositeOperation = 'source-over';
     ctx.strokeStyle = stroke.color || '#111';
     ctx.fillStyle = ctx.strokeStyle;
+    ctx.globalAlpha = 1;
   }
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -60,6 +71,17 @@ export function renderStroke(ctx, stroke, dpr = 1, offset) {
     ctx.beginPath();
     ctx.arc((p.x + ox) * dpr, (p.y + oy) * dpr, r, 0, 2 * Math.PI);
     ctx.fill();
+  } else if (stroke.highlighter) {
+    // One continuous, constant-width path. Stroking the whole marker in a
+    // single pass keeps the translucency even — drawing it as separate
+    // overlapping segments would darken every joint.
+    ctx.lineWidth = base;
+    ctx.beginPath();
+    ctx.moveTo((pts[0].x + ox) * dpr, (pts[0].y + oy) * dpr);
+    for (let i = 1; i < pts.length; i += 1) {
+      ctx.lineTo((pts[i].x + ox) * dpr, (pts[i].y + oy) * dpr);
+    }
+    ctx.stroke();
   } else {
     for (let i = 1; i < pts.length; i += 1) {
       const a = pts[i - 1];
@@ -87,7 +109,9 @@ export function renderStrokeIncremental(ctx, stroke, fromIndex, dpr = 1, offset)
   for (let i = start; i < pts.length; i += 1) {
     const a = pts[i - 1];
     const b = pts[i];
-    const w = base * Math.max(0.25, (a.p + b.p) / 2);
+    // Marker is constant width (matching the single-path final render);
+    // the pen varies width with pen pressure.
+    const w = stroke.highlighter ? base : base * Math.max(0.25, (a.p + b.p) / 2);
     ctx.lineWidth = w;
     ctx.beginPath();
     ctx.moveTo((a.x + ox) * dpr, (a.y + oy) * dpr);

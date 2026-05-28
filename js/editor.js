@@ -258,8 +258,15 @@ export async function mountEditor(root, notebookId) {
   const strokes = await listStrokesByPage(page.id);
   let pencilEnabled = false;
   let eraserMode = false;
+  // Highlighter ("מרקר") mode: same pen surface, but strokes are wide and
+  // semi-transparent so they mark over text/digits without hiding them.
+  let markerMode = false;
   let penColor = PEN_COLORS[0];
   const penWidth = 2.4;
+  // Marker strokes are much wider than the pen so a single pass covers a
+  // line of math; the see-through look comes from the alpha applied in
+  // strokes.js, not from the width.
+  const MARKER_WIDTH = 18;
   let canvas = null;
   let ctx = null;
   let detachPencil = null;
@@ -296,13 +303,15 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת טקסט">📝 <span class="label">טקסט על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
-          <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
-          <button class="btn btn--ghost" id="save-pdf" aria-label="שמירה כ-PDF ושיתוף" title="שמירה כ-PDF ושיתוף דרך אפשרויות ה-iPad">📄 <span class="label">PDF</span></button>
+          <button class="btn btn--ghost" id="print-page" aria-label="הדפסה ושמירה כ-PDF" title="הדפסה, או שמירה כ-PDF ושיתוף דרך אפשרויות ה-iPad">🖨️ <span class="label">הדפסה</span></button>
           <span class="editor__sep"></span>
-          <button class="btn btn--ghost" id="row-insert" aria-label="הוספת שורה">➕↕ <span class="label">שורה</span></button>
-          <button class="btn btn--ghost" id="row-delete" aria-label="מחיקת שורה">➖↕ <span class="label">שורה</span></button>
-          <button class="btn btn--ghost" id="col-insert" aria-label="הוספת עמודה">➕↔ <span class="label">עמודה</span></button>
-          <button class="btn btn--ghost" id="col-delete" aria-label="מחיקת עמודה">➖↔ <span class="label">עמודה</span></button>
+          <button class="btn btn--ghost" id="toggle-grid-tools" aria-label="שורות ועמודות" title="הוספה ומחיקה של שורות ועמודות" aria-expanded="false">▦ <span class="label">שורות ועמודות</span></button>
+          <span class="grid-tools" id="grid-tools" hidden>
+            <button class="btn btn--ghost" id="row-insert" aria-label="הוספת שורה">➕↕ <span class="label">שורה</span></button>
+            <button class="btn btn--ghost" id="row-delete" aria-label="מחיקת שורה">➖↕ <span class="label">שורה</span></button>
+            <button class="btn btn--ghost" id="col-insert" aria-label="הוספת עמודה">➕↔ <span class="label">עמודה</span></button>
+            <button class="btn btn--ghost" id="col-delete" aria-label="מחיקת עמודה">➖↔ <span class="label">עמודה</span></button>
+          </span>
           <button class="btn btn--ghost" id="toggle-align-guides" aria-label="קווי יישור">📏 <span class="label">קווי יישור</span></button>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="toggle-pen" aria-label="ציור">✏️ <span class="label">ציור</span></button>
@@ -311,6 +320,7 @@ export async function mountEditor(root, notebookId) {
               (c, i) => `<button class="pen-color ${i === 0 ? 'pen-color--active' : ''}"
                 style="background:${c}" data-color="${c}" aria-label="צבע"></button>`
             ).join('')}
+            <button class="btn btn--ghost" id="toggle-marker" aria-label="מרקר" title="מרקר — סימון בהדגשה שקופה מעל הכתוב">🖍️ <span class="label">מרקר</span></button>
             <button class="btn btn--ghost" id="toggle-eraser" aria-label="מחק">🧽 <span class="label">מחק</span></button>
             <button class="btn btn--ghost" id="undo-stroke" aria-label="בטל">↺ <span class="label">בטל</span></button>
             <button class="btn btn--ghost" id="clear-strokes" aria-label="נקה ציורים">🗑️ <span class="label">נקה ציורים</span></button>
@@ -486,6 +496,19 @@ export async function mountEditor(root, notebookId) {
     deleteColAtCursor()
   );
 
+  // Row/column controls used to be four buttons sitting permanently in the
+  // toolbar, which ate a lot of width. They now live in a small group that
+  // stays collapsed behind one "שורות ועמודות" button (mirroring how the
+  // pen tools reveal behind ✏️), so the bar is far less crowded.
+  const gridToolsEl = document.getElementById('grid-tools');
+  const gridToolsBtn = document.getElementById('toggle-grid-tools');
+  gridToolsBtn.addEventListener('click', () => {
+    const show = gridToolsEl.hidden;
+    gridToolsEl.hidden = !show;
+    gridToolsBtn.classList.toggle('btn--active', show);
+    gridToolsBtn.setAttribute('aria-expanded', show ? 'true' : 'false');
+  });
+
   // Print: snapshot the canvas as an <img> in place so drawings make it
   // into the PDF (browsers don't reliably print absolute-positioned canvas).
   let printSnapshotImg = null;
@@ -548,26 +571,21 @@ export async function mountEditor(root, notebookId) {
   window.addEventListener('afterprint', removePrintSnapshot);
   window.addEventListener('afterprint', restorePdfPrintLayout);
 
-  document.getElementById('print-page').addEventListener('click', () => {
-    flushSave();
-    window.print();
-  });
-
-  // Save as PDF + share via iPad's native capabilities. iPadOS Safari
-  // shows its native print sheet, whose top share button saves a PDF
-  // into Files / AirDrop / Mail. The trick is preserving the
-  // user-activation token Safari uses to decide whether print() was
-  // "user-initiated" — once Safari has flagged a site as auto-printing
-  // (which happened to this app while the v39/v40 code wrapped print()
-  // in requestAnimationFrame), it pops the "automatic printing
-  // blocked" dialog for any call that isn't ABSOLUTELY clean.
+  // Print AND "save as PDF" are the same iPadOS flow: window.print() opens
+  // the native print sheet, whose top share button saves a PDF into Files /
+  // AirDrop / Mail. There used to be a separate 📄 PDF button, but it took
+  // the kid to this exact same sheet, so the two were merged into this one
+  // 🖨️ button. We always set pdfPrintIntent so the print/PDF output drops
+  // split mode and therefore contains every section (see the beforeprint /
+  // afterprint listeners above, which fire inside print()'s own task).
   //
-  // So this handler is intentionally just three statements: set the
-  // intent flag, fire the save flush (no await), call print(). All
-  // DOM adjustments (drop split mode, restore on afterprint) live in
-  // the beforeprint / afterprint listeners above, which fire inside
-  // print()'s own task and don't break activation.
-  document.getElementById('save-pdf').addEventListener('click', () => {
+  // The handler is intentionally just three statements: set the intent flag,
+  // fire the save flush (no await), call print(). Preserving the
+  // user-activation token Safari uses to decide whether print() was
+  // "user-initiated" is critical — once Safari has flagged a site as
+  // auto-printing, it pops the "automatic printing blocked" dialog for any
+  // call that isn't ABSOLUTELY clean.
+  document.getElementById('print-page').addEventListener('click', () => {
     pdfPrintIntent = true;
     flushSave();
     window.print();
@@ -579,18 +597,18 @@ export async function mountEditor(root, notebookId) {
   // click the toolbar button on arrival — iOS Safari requires print()
   // to be triggered from a real user gesture, and a script-initiated
   // click after a hash-change navigation no longer counts. Instead we
-  // surface a Hebrew toast telling the kid to tap 📄 PDF and briefly
-  // pulse the toolbar button so it's easy to spot. The flag is
-  // consumed on read so a refresh of the editor doesn't loop.
+  // surface a Hebrew toast telling the kid to tap 🖨️ הדפסה (which now also
+  // saves as PDF) and briefly pulse the toolbar button so it's easy to
+  // spot. The flag is consumed on read so a refresh doesn't loop.
   if (sessionStorage.getItem('mathapp.autoPdf') === notebookId) {
     sessionStorage.removeItem('mathapp.autoPdf');
     requestAnimationFrame(() => {
-      const pdfBtn = document.getElementById('save-pdf');
+      const pdfBtn = document.getElementById('print-page');
       if (pdfBtn) {
         pdfBtn.classList.add('btn--pulse');
         setTimeout(() => pdfBtn.classList.remove('btn--pulse'), 3200);
       }
-      toast('הקישי על 📄 PDF בסרגל הכלים כדי לשמור כ-PDF ולשתף.', {
+      toast('הקישי על 🖨️ הדפסה בסרגל הכלים כדי לשמור כ-PDF ולשתף.', {
         kind: 'info',
         duration: 5000
       });
@@ -657,9 +675,25 @@ export async function mountEditor(root, notebookId) {
     }
   }, { capture: true, signal: mountSignal });
 
-  document.getElementById('toggle-eraser').addEventListener('click', (e) => {
+  const eraserBtn = document.getElementById('toggle-eraser');
+  const markerBtn = document.getElementById('toggle-marker');
+  // Eraser and marker are mutually exclusive — each click turns the other
+  // off so the kid is never secretly in two modes at once.
+  eraserBtn.addEventListener('click', () => {
     eraserMode = !eraserMode;
-    e.currentTarget.classList.toggle('btn--active', eraserMode);
+    if (eraserMode && markerMode) {
+      markerMode = false;
+      markerBtn.classList.remove('btn--active');
+    }
+    eraserBtn.classList.toggle('btn--active', eraserMode);
+  });
+  markerBtn.addEventListener('click', () => {
+    markerMode = !markerMode;
+    if (markerMode && eraserMode) {
+      eraserMode = false;
+      eraserBtn.classList.remove('btn--active');
+    }
+    markerBtn.classList.toggle('btn--active', markerMode);
   });
 
   document.getElementById('undo-stroke').addEventListener('click', undoLastStroke);
@@ -1928,9 +1962,11 @@ export async function mountEditor(root, notebookId) {
       // every kid has a Pencil.
       allowFinger: true,
       getColor: () => penColor,
-      getWidth: () => penWidth,
+      // Marker strokes are wide; pen strokes are thin.
+      getWidth: () => (markerMode ? MARKER_WIDTH : penWidth),
       getEraserMode: () => eraserMode,
-      onStrokeStart: ({ color, width, eraser, point }) => {
+      getHighlighter: () => markerMode,
+      onStrokeStart: ({ color, width, eraser, highlighter, point }) => {
         const id = `stroke_${Date.now().toString(36)}_${Math.random()
           .toString(36)
           .slice(2, 6)}`;
@@ -1950,6 +1986,7 @@ export async function mountEditor(root, notebookId) {
           color,
           width,
           eraser,
+          highlighter,
           points: [relPoint],
           createdAt: Date.now()
         };
@@ -1978,6 +2015,14 @@ export async function mountEditor(root, notebookId) {
         liveStrokes.delete(id);
         liveDrawnPointCount.delete(id);
         liveStrokeOffsets.delete(id);
+        // Marker strokes are drawn live segment-by-segment, which compounds
+        // their translucency at the joints into uneven dark spots. Once the
+        // stroke is finished (and nothing else is mid-draw), repaint so the
+        // marker shows as one even, see-through band — renderStroke draws a
+        // highlighter as a single constant-width path.
+        if (stroke.highlighter && liveStrokes.size === 0) {
+          replayStrokes(canvas, strokes, offsetForStroke);
+        }
         const savePromise = addStroke(stroke).catch((err) => {
           console.error('Failed to save stroke:', err);
           notifySaveError();
