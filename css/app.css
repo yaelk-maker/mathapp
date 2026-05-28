@@ -2361,6 +2361,19 @@ h1 {
 @media print {
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { background: white; }
+  /* In split view the editor hides every section except the active one.
+     A PDF / print snapshot wants the whole notebook, not just whichever
+     page the kid happens to be looking at — restore inactive sections
+     for the print pass only. The 📄 PDF button additionally drops the
+     split class entirely so the layout reflows back to stacked, but this
+     override is the belt-and-suspenders that also catches plain
+     window.print() from the 🖨️ button while split mode is on. */
+  .editor--split .block--inactive-section { display: block !important; }
+  .editor--split #page > .worksheet,
+  .editor--split #page > .workblock {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+  }
   .editor__topbar,
   .editor__actions,
   .editor__keypad-host,
