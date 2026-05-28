@@ -287,6 +287,7 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
           <button class="btn btn--ghost" id="print-page" aria-label="הדפסה">🖨️ <span class="label">הדפסה</span></button>
+          <button class="btn btn--ghost" id="save-pdf" aria-label="שמירה כ-PDF ושיתוף" title="שמירה כ-PDF ושיתוף דרך אפשרויות ה-iPad">📄 <span class="label">PDF</span></button>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="row-insert" aria-label="הוספת שורה">➕↕ <span class="label">שורה</span></button>
           <button class="btn btn--ghost" id="row-delete" aria-label="מחיקת שורה">➖↕ <span class="label">שורה</span></button>
@@ -511,6 +512,72 @@ export async function mountEditor(root, notebookId) {
     flushSave();
     window.print();
   });
+
+  // Save as PDF + share via iPad's native capabilities. On iPadOS Safari
+  // window.print() opens the system print sheet, which has a built-in
+  // share button (top-right) and a pinch-out gesture that lets the kid
+  // save the result as a PDF straight into Files / iCloud / AirDrop /
+  // Mail. That IS the iPad's "save as PDF and share" capability — we
+  // just wire a clearly-labelled entry point to it.
+  //
+  // Two adjustments vs. plain print:
+  //   1. Temporarily drop split mode so every section ends up in the
+  //      output. The split CSS hides .block--inactive-section, which
+  //      would otherwise leave the PDF with just the worksheet the kid
+  //      is currently looking at. We restore the kid's split preference
+  //      on afterprint regardless of whether they completed or
+  //      cancelled the dialog.
+  //   2. Flush pending saves so the latest typing actually makes it
+  //      into the snapshot (matches the print button).
+  document.getElementById('save-pdf').addEventListener('click', async () => {
+    await flushSave();
+    const wasSplit = splitMode;
+    if (wasSplit) {
+      editorEl.classList.remove('editor--split');
+    }
+    // One-shot afterprint handler to restore split mode. We attach
+    // here (not at mount) so we don't accumulate listeners across
+    // multiple PDF saves. The flag stops a stray afterprint from a
+    // regular print button click from undoing the kid's split toggle.
+    const restoreSplit = () => {
+      if (wasSplit) {
+        editorEl.classList.add('editor--split');
+      }
+      window.removeEventListener('afterprint', restoreSplit);
+    };
+    window.addEventListener('afterprint', restoreSplit);
+    // Brief hint about how to save+share on iPadOS — without it the kid
+    // sees the print preview and might not realize the share button on
+    // the top of that sheet is what makes a PDF file out of it.
+    toast('בתצוגה המקדימה: לחצי על כפתור השיתוף 📤 כדי לשמור כ-PDF ולשתף', {
+      kind: 'info',
+      duration: 4800
+    });
+    // Defer the print() to the next frame so the toast can render and
+    // the split-mode reflow can settle into print layout before iOS
+    // captures the snapshot.
+    requestAnimationFrame(() => window.print());
+  });
+
+  // Home-screen / folder-screen PDF entry: when the kid taps the "📄"
+  // button on a notebook card it sets sessionStorage and navigates to
+  // the editor with this flag. We honor the flag once on mount: render,
+  // flush pending saves, and trigger the same PDF flow as the toolbar
+  // button. Skipping the auto-print AFTER consuming the flag (whether
+  // it succeeded or not) so a refresh of the editor doesn't loop into
+  // print() over and over.
+  if (sessionStorage.getItem('mathapp.autoPdf') === notebookId) {
+    sessionStorage.removeItem('mathapp.autoPdf');
+    // Let the first render + canvas size-and-replay settle before the
+    // print snapshot fires. requestAnimationFrame ×2 keeps us behind
+    // resizeAndReplay's pending frame.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const pdfBtn = document.getElementById('save-pdf');
+        if (pdfBtn) pdfBtn.click();
+      })
+    );
+  }
 
   // Pencil toolbar wiring. Pen mode also auto-collapses the math keypad —
   // it isn't used while drawing and reclaiming that ~40% of vertical space
