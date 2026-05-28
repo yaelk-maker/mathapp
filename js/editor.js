@@ -489,6 +489,13 @@ export async function mountEditor(root, notebookId) {
   // Print: snapshot the canvas as an <img> in place so drawings make it
   // into the PDF (browsers don't reliably print absolute-positioned canvas).
   let printSnapshotImg = null;
+  // Tracks whether the current print pass came from the 📄 PDF button so
+  // the beforeprint/afterprint listeners know to also drop+restore split
+  // mode. Set synchronously by the 📄 click handler RIGHT BEFORE
+  // window.print() — the events fire inside print() in the same task, so
+  // the flag is always observed.
+  let pdfPrintIntent = false;
+  let pdfPrintSplitWasOn = false;
   function injectPrintSnapshot() {
     if (!canvas) return;
     try {
@@ -515,65 +522,54 @@ export async function mountEditor(root, notebookId) {
     }
     if (canvas) canvas.style.visibility = '';
   }
+  // beforeprint also drops split mode for PDF prints so the snapshot
+  // contains every section (in split mode the CSS hides
+  // .block--inactive-section). Running this here — not in the click
+  // handler — keeps the click→print() call chain a single sync line,
+  // which iPadOS Safari requires to keep the user-activation token
+  // alive and avoid the "automatic printing blocked" dialog.
+  function applyPdfPrintLayout() {
+    if (!pdfPrintIntent) return;
+    pdfPrintSplitWasOn = splitMode;
+    if (pdfPrintSplitWasOn) {
+      editorEl.classList.remove('editor--split');
+    }
+  }
+  function restorePdfPrintLayout() {
+    if (!pdfPrintIntent) return;
+    pdfPrintIntent = false;
+    if (pdfPrintSplitWasOn) {
+      editorEl.classList.add('editor--split');
+    }
+    pdfPrintSplitWasOn = false;
+  }
   window.addEventListener('beforeprint', injectPrintSnapshot);
+  window.addEventListener('beforeprint', applyPdfPrintLayout);
   window.addEventListener('afterprint', removePrintSnapshot);
+  window.addEventListener('afterprint', restorePdfPrintLayout);
 
   document.getElementById('print-page').addEventListener('click', () => {
     flushSave();
     window.print();
   });
 
-  // Save as PDF + share via iPad's native capabilities. On iPadOS Safari
-  // window.print() opens the system print sheet, which has a built-in
-  // share button (top-right) and a pinch-out gesture that lets the kid
-  // save the result as a PDF straight into Files / iCloud / AirDrop /
-  // Mail. That IS the iPad's "save as PDF and share" capability — we
-  // just wire a clearly-labelled entry point to it.
+  // Save as PDF + share via iPad's native capabilities. iPadOS Safari
+  // shows its native print sheet, whose top share button saves a PDF
+  // into Files / AirDrop / Mail. The trick is preserving the
+  // user-activation token Safari uses to decide whether print() was
+  // "user-initiated" — once Safari has flagged a site as auto-printing
+  // (which happened to this app while the v39/v40 code wrapped print()
+  // in requestAnimationFrame), it pops the "automatic printing
+  // blocked" dialog for any call that isn't ABSOLUTELY clean.
   //
-  // Two adjustments vs. plain print:
-  //   1. Temporarily drop split mode so every section ends up in the
-  //      output. The split CSS hides .block--inactive-section, which
-  //      would otherwise leave the PDF with just the worksheet the kid
-  //      is currently looking at. We restore the kid's split preference
-  //      on afterprint regardless of whether they completed or
-  //      cancelled the dialog.
-  //   2. Fire-and-forget the save flush (no await) so window.print() is
-  //      reached synchronously from the click handler. iOS Safari only
-  //      treats print() as user-initiated when the call stack is still
-  //      inside the gesture; awaiting an async save (or wrapping print
-  //      in requestAnimationFrame) drops the activation and Safari
-  //      surfaces an "automatic printing blocked" dialog instead of
-  //      the print sheet.
+  // So this handler is intentionally just three statements: set the
+  // intent flag, fire the save flush (no await), call print(). All
+  // DOM adjustments (drop split mode, restore on afterprint) live in
+  // the beforeprint / afterprint listeners above, which fire inside
+  // print()'s own task and don't break activation.
   document.getElementById('save-pdf').addEventListener('click', () => {
-    // Same fire-and-forget pattern as the 🖨️ button above — the queued
-    // save will commit during/after the print pass; what's already on
-    // screen is what gets snapshotted.
+    pdfPrintIntent = true;
     flushSave();
-    const wasSplit = splitMode;
-    if (wasSplit) {
-      editorEl.classList.remove('editor--split');
-    }
-    // One-shot afterprint handler to restore split mode. We attach
-    // here (not at mount) so we don't accumulate listeners across
-    // multiple PDF saves. The flag stops a stray afterprint from a
-    // regular print button click from undoing the kid's split toggle.
-    const restoreSplit = () => {
-      if (wasSplit) {
-        editorEl.classList.add('editor--split');
-      }
-      window.removeEventListener('afterprint', restoreSplit);
-    };
-    window.addEventListener('afterprint', restoreSplit);
-    // Brief hint about how to save+share on iPadOS — without it the kid
-    // sees the print preview and might not realize the share button on
-    // the top of that sheet is what makes a PDF file out of it.
-    toast('בתצוגה המקדימה: לחצי על כפתור השיתוף 📤 כדי לשמור כ-PDF ולשתף', {
-      kind: 'info',
-      duration: 4800
-    });
-    // Call print() synchronously so iOS Safari sees a valid user
-    // activation — no rAF wrapper, no await above. The toast renders
-    // in the same task; the print sheet appears immediately after.
     window.print();
   });
 
