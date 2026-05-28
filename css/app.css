@@ -2395,7 +2395,17 @@ h1 {
   .pen-mode-indicator,
   .pencil-canvas,
   #app > .screen .toolbar,
-  .notebook-card__delete {
+  .notebook-card__delete,
+  /* Per-block editor chrome. These sit just outside the worksheet /
+     workblock content (the drag handle on the left, the × delete and
+     resize ⤡ handles on the right, the column-count chip top-right).
+     Without explicit hides they leak into the print snapshot and look
+     like the page is cropping content at both edges. */
+  .block__handle,
+  .worksheet__delete,
+  .workblock__delete,
+  .workblock__resize,
+  .workblock__cols {
     display: none !important;
   }
   .editor--full {
@@ -2413,6 +2423,12 @@ h1 {
   .editor__page-content {
     padding: 0 !important;
     min-height: 0 !important;
+  }
+  /* The workblock reserves padding-top: 22px in screen layout so the
+     drag handle (now hidden above) doesn't overlap the first row.
+     Reclaim that space in print so blocks pack tightly on the page. */
+  .workblock {
+    padding-top: 0 !important;
   }
   .pencil-print-snapshot {
     display: block !important;
