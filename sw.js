@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v54';
+const CACHE = 'mathapp-shell-v55';
 const SHELL = [
   './',
   './index.html',

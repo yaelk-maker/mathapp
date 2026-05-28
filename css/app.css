@@ -1409,16 +1409,6 @@ h1 {
   z-index: 1;
 }
 
-/* Faint vertical guide drawn through every column that holds a `=`/`>`/`<`/`≤`/
-   `≥`/`≠` cell. Helps the kid line up successive steps of an inequality without
-   manually counting columns. Pointer-events: none so taps still hit the cell. */
-.grid__align-guide {
-  pointer-events: none;
-  border-left: 1px dashed rgba(33, 99, 168, 0.32);
-  margin-left: calc(var(--cell-size) / 2);
-  width: 0;
-  z-index: 0;
-}
 /* Heavier line every 5 columns/rows for readability (like graph paper) */
 .cell[data-c="4"], .cell[data-c="9"], .cell[data-c="14"], .cell[data-c="19"] {
   border-right-color: #b8b8b8;
