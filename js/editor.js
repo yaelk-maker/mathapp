@@ -32,11 +32,13 @@ import {
   newAbsCell,
   MARGIN_COLS,
   migrateWorkBlockMargin,
+  migrateWorkBlockRowLabels,
   migrateWorkBlockSize,
   newAnnotation,
   newGridAnnotation,
   isGridAnnotation,
   nextExerciseLabel,
+  nextRowLabel,
   getAnnotations
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor, paintCell } from './render/grid.js';
@@ -138,6 +140,7 @@ export async function mountEditor(root, notebookId) {
       if (block.type === BLOCK.WORK) {
         if (migrateWorkBlockMargin(block)) migrated = true;
         if (migrateWorkBlockSize(block)) migrated = true;
+        if (migrateWorkBlockRowLabels(block)) migrated = true;
         if (block.label == null) {
           block.label = String(exerciseCounter);
           migrated = true;
@@ -208,6 +211,13 @@ export async function mountEditor(root, notebookId) {
   // Cleared when the kid taps a workblock cell or focuses a text
   // annotation — the focus targets are mutually exclusive.
   let activeGridAnnot = null;
+
+  // Active row-label popover. Carries the workblock id + row number
+  // and a reference to the floating editor DOM. While set, the in-app
+  // keypad routes presses into the popover's contenteditable instead
+  // of the workblock grid (mutually exclusive with activeGridAnnot
+  // and grid-cell focus). Cleared on Enter / outside-tap / Esc.
+  let activeRowLabel = null;
 
   // When the kid focuses a worksheet annotation, the in-app keypad routes
   // its presses to insert text at the caret instead of into the active
@@ -937,7 +947,12 @@ export async function mountEditor(root, notebookId) {
           },
           onLabelEdit: handleExerciseLabelEdit,
           onMovePart: (part, drow, dcol) => movePartAndSave(block, part, drow, dcol),
-          onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined
+          onDelete: canDeleteWork ? (id) => removeBlock(id) : undefined,
+          onRowLabelTap: (r, overlay) => openRowLabelEditor(block, r, overlay),
+          rowLabelEditingRow:
+            activeRowLabel && activeRowLabel.blockId === block.id
+              ? activeRowLabel.row
+              : null
         });
         el = wrapper;
         if (isActive) {
@@ -2060,6 +2075,11 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode('english');
       return;
     }
+    // Row-label popover has focus — route presses there. Same pattern
+    // as the exercise-label chip below; sits above it in the dispatch
+    // order so the popover gets the key whenever it's open.
+    const rowLabelInput = getFocusedRowLabelInput();
+    if (rowLabelInput) return handleRowLabelKey(rowLabelInput, code);
     // Exercise-label chip has focus — route presses into the contenteditable
     // label rather than the work-block cells. Same pattern as annotations.
     const labelEl = getFocusedExerciseLabel();
@@ -2109,6 +2129,8 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode('hebrew');
       return;
     }
+    const rowLabelInput = getFocusedRowLabelInput();
+    if (rowLabelInput) return handleRowLabelKey(rowLabelInput, code);
     const labelEl = getFocusedExerciseLabel();
     if (labelEl) return handleExerciseLabelKey(labelEl, code);
     const annotEl = getFocusedAnnotation();
@@ -2241,6 +2263,8 @@ export async function mountEditor(root, notebookId) {
       setKeypadMode(lastAlphaMode);
       return;
     }
+    const rowLabelInput = getFocusedRowLabelInput();
+    if (rowLabelInput) return handleRowLabelKey(rowLabelInput, code);
     const labelEl = getFocusedExerciseLabel();
     if (labelEl) return handleExerciseLabelKey(labelEl, code);
     const annotEl = getFocusedAnnotation();
@@ -2517,6 +2541,257 @@ export async function mountEditor(root, notebookId) {
     if (typeof code === 'string' && [...code].length === 1) {
       if (document.activeElement !== labelEl) labelEl.focus();
       document.execCommand('insertText', false, code);
+    }
+  }
+
+  // ---------- row-label popover ----------
+  //
+  // Tapping the left-margin gutter of a row in a work block opens a
+  // small floating editor that lets the kid attach an optional
+  // sub-question label (א/ב/1.1/a/…) to that row. The popover is
+  // anchored to the gutter overlay but sized for a comfortable typing
+  // surface: it slides leftward into the page's left padding when
+  // there's room, or rightward over the workblock when there isn't.
+  // The in-app keypad routes presses into the popover's contenteditable
+  // the same way it routes into the exercise-label chip.
+  //
+  // The label itself renders centered in the gutter (see grid.js); the
+  // popover is the editor, not the display surface.
+
+  function openRowLabelEditor(block, row, overlayEl) {
+    // Close any existing popover first. We commit so the kid doesn't
+    // lose typing when they jump to label another row mid-edit.
+    // closeRowLabelEditor triggers a re-render, which detaches the
+    // overlayEl we were passed — so below we re-query a fresh overlay
+    // from the DOM before measuring.
+    if (activeRowLabel) {
+      const sameTarget =
+        activeRowLabel.blockId === block.id && activeRowLabel.row === row;
+      closeRowLabelEditor({ commit: true });
+      // If the kid re-tapped the same gutter, treat that as "I'm done"
+      // rather than re-opening the editor immediately — matches how the
+      // exercise-label chip behaves (tap → enter, tap-away → exit).
+      if (sameTarget) return;
+    }
+    pushUndo();
+
+    // Re-acquire the overlay from the DOM in case the close above
+    // ran a re-render and detached the original element.
+    const freshOverlay = pageHost.querySelector(
+      `.workblock[data-block-id="${block.id}"] .workblock__row-label[data-r="${row}"]`
+    );
+    if (!freshOverlay) return; // workblock was removed underneath us
+    overlayEl = freshOverlay;
+
+    activeRowLabel = { blockId: block.id, row, popover: null };
+
+    // Drop competing focus targets so the keypad only routes into the
+    // popover from here on. Mirrors the focus-mutex logic in onCellTap.
+    const annotEl = getFocusedAnnotation();
+    if (annotEl) annotEl.blur();
+    const labelChip = getFocusedExerciseLabel();
+    if (labelChip) labelChip.blur();
+    activeGridAnnot = null;
+    clearActiveCursorHighlight();
+
+    overlayEl.classList.add('workblock__row-label--editing');
+
+    const pageRect = pageContent.getBoundingClientRect();
+    const overlayRect = overlayEl.getBoundingClientRect();
+
+    const popover = document.createElement('div');
+    popover.className = 'workblock__row-label-editor';
+    popover.setAttribute('dir', 'auto');
+    popover.dataset.blockId = block.id;
+    popover.dataset.r = String(row);
+
+    const input = document.createElement('span');
+    input.className = 'workblock__row-label-editor-input';
+    input.setAttribute('contenteditable', 'plaintext-only');
+    input.setAttribute('inputmode', 'none');
+    input.setAttribute('spellcheck', 'false');
+    input.setAttribute('dir', 'auto');
+    input.setAttribute('aria-label', 'תווית שורה');
+    input.textContent = (block.rowLabels && block.rowLabels[row]) || '';
+    popover.appendChild(input);
+
+    // Successor hint. Only shown when the PREVIOUS row already has a
+    // label that nextRowLabel can advance — otherwise the button has
+    // nothing useful to do and would clutter the popover.
+    const prevLabel = row > 0 && block.rowLabels ? block.rowLabels[row - 1] : '';
+    const suggestion = prevLabel ? nextRowLabel(prevLabel) : '';
+    if (suggestion && input.textContent === '') {
+      const hint = document.createElement('button');
+      hint.type = 'button';
+      hint.className = 'workblock__row-label-editor-hint';
+      hint.textContent = `↓ ${suggestion}`;
+      hint.setAttribute('aria-label', `הוסיפי תווית ${suggestion}`);
+      hint.addEventListener('mousedown', (e) => e.preventDefault());
+      hint.addEventListener('click', (event) => {
+        event.stopPropagation();
+        input.textContent = suggestion;
+        // Re-focus the input + place the caret at the end so the kid
+        // can keep typing if they want a longer label.
+        focusAtEnd(input);
+      });
+      popover.appendChild(hint);
+    }
+
+    // Position: anchor the popover so it visually points at the gutter
+    // overlay's right edge (which sits against the math area). Prefer
+    // to extend LEFT into the page padding. If that would clip past
+    // the page's left edge, flip rightward and overlay the math area
+    // instead. Either way we anchor in #page-content coordinates so
+    // the popover scrolls with the workblock.
+    pageContent.appendChild(popover);
+    // Defer measurement until the element is in the DOM so getBoundingClientRect
+    // returns a real size — needed for the rightward-flip decision.
+    requestAnimationFrame(() => {
+      const popRect = popover.getBoundingClientRect();
+      const desiredWidth = Math.max(popRect.width, 140);
+      const topInContent = overlayRect.top - pageRect.top - 4;
+      const overlayLeftInContent = overlayRect.left - pageRect.left;
+      const overlayRightInContent = overlayRect.right - pageRect.left;
+      const leftRoom = overlayLeftInContent;
+      let left;
+      if (leftRoom >= desiredWidth + 8) {
+        left = overlayLeftInContent - desiredWidth - 6;
+      } else {
+        // Not enough room to the left — slide rightward to overlay
+        // the math area (still readable; the kid is editing this row,
+        // so covering its right side briefly is acceptable).
+        left = overlayRightInContent + 6;
+      }
+      popover.style.top = `${topInContent}px`;
+      popover.style.left = `${left}px`;
+    });
+
+    activeRowLabel.popover = popover;
+
+    // Focus the input + select all so a quick label-overwrite (e.g.
+    // the kid is changing "א" to "ב") feels natural — first keypress
+    // replaces the existing text instead of appending.
+    requestAnimationFrame(() => {
+      input.focus();
+      const range = document.createRange();
+      range.selectNodeContents(input);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    // Commit on outside-tap. Listener is single-shot per popover so
+    // we don't have to track it across re-renders.
+    const outsideHandler = (event) => {
+      if (!activeRowLabel || activeRowLabel.popover !== popover) {
+        document.removeEventListener('pointerdown', outsideHandler, true);
+        return;
+      }
+      if (popover.contains(event.target)) return;
+      if (event.target.closest && event.target.closest('.workblock__row-label')) {
+        // Tapping a different row-label gutter — let its own click
+        // handler fire openRowLabelEditor which will close+reopen for us.
+        return;
+      }
+      document.removeEventListener('pointerdown', outsideHandler, true);
+      closeRowLabelEditor({ commit: true });
+    };
+    document.addEventListener('pointerdown', outsideHandler, true);
+
+    // Native Enter on a hardware keyboard also commits.
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        closeRowLabelEditor({ commit: true });
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeRowLabelEditor({ commit: false });
+      }
+    });
+  }
+
+  function closeRowLabelEditor({ commit }) {
+    if (!activeRowLabel) return;
+    const { blockId, row, popover } = activeRowLabel;
+    activeRowLabel = null;
+    if (commit) {
+      const block = page.blocks.find((b) => b.id === blockId);
+      if (block && block.type === BLOCK.WORK) {
+        if (!block.rowLabels) block.rowLabels = {};
+        const input = popover && popover.querySelector('.workblock__row-label-editor-input');
+        const raw = input ? (input.textContent || '') : '';
+        const cleaned = raw.replace(/\s+/g, ' ').trim();
+        const had = !!block.rowLabels[row];
+        if (cleaned) {
+          if (block.rowLabels[row] !== cleaned) {
+            block.rowLabels[row] = cleaned;
+            queueSave();
+          }
+        } else if (had) {
+          delete block.rowLabels[row];
+          queueSave();
+        }
+      }
+    }
+    if (popover && popover.parentElement) popover.parentElement.removeChild(popover);
+    // Clear the editing highlight on whichever overlay was active. The
+    // overlay element may have been re-rendered out from under us, in
+    // which case the next render will simply not paint the class — no
+    //-op here, no crash.
+    if (pageHost) {
+      pageHost.querySelectorAll('.workblock__row-label--editing').forEach((el) =>
+        el.classList.remove('workblock__row-label--editing')
+      );
+    }
+    // Re-render so the committed label paints in the gutter (or clears
+    // if it was emptied).
+    renderBlocks();
+  }
+
+  function getFocusedRowLabelInput() {
+    if (!activeRowLabel || !activeRowLabel.popover) return null;
+    const input = activeRowLabel.popover.querySelector(
+      '.workblock__row-label-editor-input'
+    );
+    if (!input) return null;
+    return document.activeElement === input ? input : null;
+  }
+
+  function handleRowLabelKey(inputEl, code) {
+    if (code === 'EXIT' || code === 'NEWLINE') {
+      closeRowLabelEditor({ commit: true });
+      return;
+    }
+    if (code === 'BACKSPACE') {
+      if (document.activeElement !== inputEl) inputEl.focus();
+      document.execCommand('delete', false, null);
+      return;
+    }
+    // Mode toggles bubble through the dispatcher above; arrow keys
+    // and composite codes don't make sense in a short label so swallow.
+    if (code === 'TOGGLE_KEYPAD' || code === 'TOGGLE_ENGLISH' || code === 'TOGGLE_HEBREW') return;
+    if (code === 'LEFT' || code === 'RIGHT' || code === 'UP' || code === 'DOWN') return;
+    if (code === 'SPACE') return;
+    if (typeof code === 'string' && [...code].length === 1) {
+      if (document.activeElement !== inputEl) inputEl.focus();
+      document.execCommand('insertText', false, code);
+    }
+  }
+
+  // Place the caret at the end of `el` (a contenteditable). Used after
+  // the auto-successor hint button writes a value so the kid can keep
+  // editing if they want a longer label.
+  function focusAtEnd(el) {
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
     }
   }
 

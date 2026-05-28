@@ -1424,6 +1424,119 @@ h1 {
   border-right: 1.5px solid #d12d2d;
 }
 
+/* Per-row label overlay covering the reserved left-margin gutter. One
+   element per row, spanning the full MARGIN_COLS-wide gutter so the
+   kid has a comfortable tap target even though each margin cell is
+   narrow on its own. Sits on top of the cell--margin cells (later in
+   DOM order ⇒ higher in z-order for grid-item siblings), centers
+   whatever label is set, and triggers the popover editor on tap. */
+.workblock__row-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Transparent fill — the underlying .cell--margin paints the notebook
+     ruling and the red right-border line, which we want to preserve. */
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: max(13px, calc(var(--cell-size) * 0.42));
+  font-weight: 600;
+  color: #6f5040;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Sit above the underlying margin cells so taps land on this overlay
+     rather than the cells (whose grid click handler ignores margin
+     columns anyway, but a single dedicated handler is cleaner). */
+  z-index: 2;
+  border-radius: 4px;
+  transition: background-color 120ms ease;
+  /* The bolder red border on the inner margin column already lives on
+     .cell--margin[data-c="1"]; the overlay must stay transparent so
+     that line shows through. */
+  pointer-events: auto;
+}
+.workblock__row-label:hover {
+  background: rgba(209, 45, 45, 0.06);
+}
+.workblock__row-label:focus-visible {
+  outline: 2px solid var(--accent, #0b6cf2);
+  outline-offset: -2px;
+}
+.workblock__row-label--set {
+  color: #b13a1f;
+}
+.workblock__row-label--editing {
+  background: rgba(209, 45, 45, 0.12);
+}
+
+/* Floating popover that opens when the gutter is tapped. Positioned
+   absolute inside #page-content, anchored next to the row's gutter,
+   sized for a finger-friendly typing surface. The editor.js layout
+   logic decides whether the popover slides leftward (into the page
+   padding) or rightward (overlaying the math area) based on available
+   room. */
+.workblock__row-label-editor {
+  position: absolute;
+  z-index: 50;
+  min-width: 140px;
+  min-height: 44px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  border: 1px solid #b13a1f;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+.workblock__row-label-editor-input {
+  display: inline-block;
+  min-width: 56px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-bottom: 2px solid rgba(177, 58, 31, 0.4);
+  font-size: 22px;
+  font-weight: 600;
+  color: #222;
+  outline: none;
+  caret-color: var(--accent, #0b6cf2);
+  white-space: pre;
+}
+.workblock__row-label-editor-input:focus {
+  border-bottom-color: var(--accent, #0b6cf2);
+}
+.workblock__row-label-editor-hint {
+  appearance: none;
+  border: 1px solid #b13a1f;
+  background: #fff5f0;
+  color: #b13a1f;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.workblock__row-label-editor-hint:hover {
+  background: #ffe6dc;
+}
+
+/* In split view the workblock can sit very close to the page edge,
+   in which case the popover will flip rightward (handled in JS). The
+   overlay also needs a slightly bigger hit target on a tight grid. */
+.editor--split .workblock__row-label {
+  font-size: max(13px, calc(var(--cell-size) * 0.5));
+}
+
+/* When printing / exporting to PDF, hide the popover (it never appears
+   in a static snapshot) but keep the rendered label text in the
+   gutter — that's the whole reason this feature exists. */
+@media print {
+  .workblock__row-label-editor { display: none !important; }
+  .workblock__row-label--editing { background: transparent !important; }
+}
+
 /* Wide composites (multi-cell fractions) need their box to actually fill
    the grid-column span. The default `width: var(--cell-size)` above pins
    every cell to one column wide and the bar/digits then overflow into
