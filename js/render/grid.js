@@ -15,7 +15,20 @@ import {
 } from '../page-model.js';
 
 export function renderWorkBlock(block, options = {}) {
-  const { onCellTap, cursor, onDelete, onMovePart, onLabelEdit } = options;
+  const {
+    onCellTap,
+    cursor,
+    onDelete,
+    onMovePart,
+    onLabelEdit,
+    // Tap on the row-label gutter — opens the popover editor in
+    // editor.js. Optional so callers that don't pass it leave the
+    // gutter in display-only mode.
+    onRowLabelTap,
+    // While the popover editor is open this is the row whose
+    // gutter we want to highlight as the active edit target.
+    rowLabelEditingRow = null
+  } = options;
 
   const wrapper = document.createElement('div');
   wrapper.className = 'workblock';
@@ -121,6 +134,61 @@ export function renderWorkBlock(block, options = {}) {
 
       grid.appendChild(cell);
     }
+  }
+
+  // Per-row label overlays in the reserved left margin. One element per
+  // row, sitting on top of the underlying cell--margin cells, sized to
+  // span the full MARGIN_COLS-wide gutter (~76–112 px depending on
+  // --cell-size) so the kid has a comfortable tap target even though
+  // each individual margin cell is too narrow on its own. The label
+  // text is centered horizontally so a single Hebrew letter and a
+  // longer "1.1" both sit visually in the middle of the gutter.
+  // Empty-label rows still render the overlay (transparent / no text)
+  // so the tap zone is consistent — the popover editor opens for any
+  // row, labeled or not.
+  const rowLabels = block.rowLabels || {};
+  for (let r = 0; r < block.rows; r += 1) {
+    const overlay = document.createElement('div');
+    overlay.className = 'workblock__row-label';
+    overlay.dataset.r = r;
+    overlay.style.gridRowStart = r + 1;
+    overlay.style.gridColumnStart = 1;
+    overlay.style.gridColumnEnd = `span ${MARGIN_COLS}`;
+    // dir="auto" so a Hebrew letter (א/ב/ג) anchors right-to-left and a
+    // Latin/numeric label (1.1, a, B) anchors left-to-right; either way
+    // the flex centering keeps the glyph(s) in the middle of the gutter.
+    overlay.setAttribute('dir', 'auto');
+    overlay.setAttribute('role', onRowLabelTap ? 'button' : 'presentation');
+    overlay.setAttribute('aria-label', `תווית שורה ${r + 1}`);
+    if (onRowLabelTap) overlay.tabIndex = 0;
+    const text = rowLabels[r];
+    if (text) {
+      overlay.textContent = text;
+      overlay.classList.add('workblock__row-label--set');
+    }
+    if (rowLabelEditingRow === r) {
+      overlay.classList.add('workblock__row-label--editing');
+    }
+    if (onRowLabelTap) {
+      // Stop the tap from reaching the grid click handler (which would
+      // try to position the math cursor) and from the workblock drag
+      // pointerdown listener at the wrapper level.
+      const fire = (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        onRowLabelTap(r, overlay);
+      };
+      overlay.addEventListener('click', fire);
+      overlay.addEventListener('mousedown', (e) => e.preventDefault());
+      overlay.addEventListener('pointerdown', (e) => e.stopPropagation());
+      overlay.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onRowLabelTap(r, overlay);
+        }
+      });
+    }
+    grid.appendChild(overlay);
   }
 
   // Render a faint vertical guide for each column where a comparison symbol

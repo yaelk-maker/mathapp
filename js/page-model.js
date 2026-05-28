@@ -67,7 +67,15 @@ export function newWorkBlock({
     label,
     // Sparse map of "r,c" -> { ch: <single character> }.
     // Composite cells (fractions, etc.) added in Phase 5 will use a richer shape.
-    cells: {}
+    cells: {},
+    // Optional per-row sub-labels rendered centered in the reserved left
+    // margin (cols 0..MARGIN_COLS-1) of that row. The kid uses these to
+    // tag rows that correspond to a worksheet's sub-questions (א/ב/ג/ד,
+    // a/b/c, 1.1/1.2…) without cramming the label into the LTR math
+    // cells where Hebrew letters would render in confusing positions.
+    // Keys are row numbers; absent rows render the margin exactly as
+    // before, so old notebooks need no migration of data.
+    rowLabels: {}
   };
 }
 
@@ -111,6 +119,60 @@ export function nextExerciseLabel(prev) {
     }
   }
   return '';
+}
+
+// Auto-successor for a row sub-label. Drives the "↓ next" hint button
+// in the row-label popover so once the kid types "א" on row 0 they can
+// one-tap "ב" onto row 1, "ג" onto row 2, etc. The set of patterns is
+// intentionally close to nextExerciseLabel but adds Latin letters and a
+// "1.1 → 1.2" sub-numbering pattern that's common in Hebrew math
+// worksheets ("שאלה 7 סעיף 1.1, 1.2…").
+//
+// Returns '' when the previous label doesn't match a pattern we can
+// safely advance — the hint button then disables itself rather than
+// guess wrong.
+export function nextRowLabel(prev) {
+  if (prev == null) return 'א';
+  const trimmed = String(prev).trim();
+  if (!trimmed) return 'א';
+  // "1.1" → "1.2", "2.7" → "2.8" — only the trailing segment increments,
+  // matching how Hebrew worksheets number sub-parts of a question.
+  const sub = trimmed.match(/^(\d+)\.(\d+)$/);
+  if (sub) return `${sub[1]}.${parseInt(sub[2], 10) + 1}`;
+  if (/^\d+$/.test(trimmed)) return String(parseInt(trimmed, 10) + 1);
+  // Single Hebrew letter (with optional suffix like geresh — preserved
+  // verbatim like nextExerciseLabel does).
+  const heb = trimmed.match(/^([א-ת])(.*)$/);
+  if (heb) {
+    const base = HEBREW_FINAL_TO_BASE[heb[1]] || heb[1];
+    const idx = HEBREW_LETTERS.indexOf(base);
+    if (idx >= 0 && idx + 1 < HEBREW_LETTERS.length) {
+      return HEBREW_LETTERS[idx + 1] + heb[2];
+    }
+    return '';
+  }
+  // Single ASCII letter — lowercase only to avoid producing weird mixed
+  // results from a one-off shifted keypress.
+  if (/^[a-y]$/.test(trimmed)) {
+    return String.fromCharCode(trimmed.charCodeAt(0) + 1);
+  }
+  if (/^[A-Y]$/.test(trimmed)) {
+    return String.fromCharCode(trimmed.charCodeAt(0) + 1);
+  }
+  return '';
+}
+
+// One-shot migration: ensure block.rowLabels exists on every work block
+// loaded from IndexedDB. Old notebooks pre-date the field and would
+// otherwise crash any read like block.rowLabels[r] downstream. Returns
+// true when it added the field so the caller can decide whether to
+// re-save (matches the other migrate* helpers' contract).
+export function migrateWorkBlockRowLabels(block) {
+  if (block && block.type === BLOCK.WORK && !block.rowLabels) {
+    block.rowLabels = {};
+    return true;
+  }
+  return false;
 }
 
 export function newWorksheetBlock({ blobId, naturalWidth, naturalHeight }) {
