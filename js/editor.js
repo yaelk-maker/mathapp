@@ -537,10 +537,18 @@ export async function mountEditor(root, notebookId) {
   //      is currently looking at. We restore the kid's split preference
   //      on afterprint regardless of whether they completed or
   //      cancelled the dialog.
-  //   2. Flush pending saves so the latest typing actually makes it
-  //      into the snapshot (matches the print button).
-  document.getElementById('save-pdf').addEventListener('click', async () => {
-    await flushSave();
+  //   2. Fire-and-forget the save flush (no await) so window.print() is
+  //      reached synchronously from the click handler. iOS Safari only
+  //      treats print() as user-initiated when the call stack is still
+  //      inside the gesture; awaiting an async save (or wrapping print
+  //      in requestAnimationFrame) drops the activation and Safari
+  //      surfaces an "automatic printing blocked" dialog instead of
+  //      the print sheet.
+  document.getElementById('save-pdf').addEventListener('click', () => {
+    // Same fire-and-forget pattern as the 🖨️ button above — the queued
+    // save will commit during/after the print pass; what's already on
+    // screen is what gets snapshotted.
+    flushSave();
     const wasSplit = splitMode;
     if (wasSplit) {
       editorEl.classList.remove('editor--split');
@@ -563,30 +571,34 @@ export async function mountEditor(root, notebookId) {
       kind: 'info',
       duration: 4800
     });
-    // Defer the print() to the next frame so the toast can render and
-    // the split-mode reflow can settle into print layout before iOS
-    // captures the snapshot.
-    requestAnimationFrame(() => window.print());
+    // Call print() synchronously so iOS Safari sees a valid user
+    // activation — no rAF wrapper, no await above. The toast renders
+    // in the same task; the print sheet appears immediately after.
+    window.print();
   });
 
   // Home-screen / folder-screen PDF entry: when the kid taps the "📄"
-  // button on a notebook card it sets sessionStorage and navigates to
-  // the editor with this flag. We honor the flag once on mount: render,
-  // flush pending saves, and trigger the same PDF flow as the toolbar
-  // button. Skipping the auto-print AFTER consuming the flag (whether
-  // it succeeded or not) so a refresh of the editor doesn't loop into
-  // print() over and over.
+  // button on a notebook card she's redirected into the editor with
+  // sessionStorage carrying the autoPdf flag. We can't programmatically
+  // click the toolbar button on arrival — iOS Safari requires print()
+  // to be triggered from a real user gesture, and a script-initiated
+  // click after a hash-change navigation no longer counts. Instead we
+  // surface a Hebrew toast telling the kid to tap 📄 PDF and briefly
+  // pulse the toolbar button so it's easy to spot. The flag is
+  // consumed on read so a refresh of the editor doesn't loop.
   if (sessionStorage.getItem('mathapp.autoPdf') === notebookId) {
     sessionStorage.removeItem('mathapp.autoPdf');
-    // Let the first render + canvas size-and-replay settle before the
-    // print snapshot fires. requestAnimationFrame ×2 keeps us behind
-    // resizeAndReplay's pending frame.
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        const pdfBtn = document.getElementById('save-pdf');
-        if (pdfBtn) pdfBtn.click();
-      })
-    );
+    requestAnimationFrame(() => {
+      const pdfBtn = document.getElementById('save-pdf');
+      if (pdfBtn) {
+        pdfBtn.classList.add('btn--pulse');
+        setTimeout(() => pdfBtn.classList.remove('btn--pulse'), 3200);
+      }
+      toast('הקישי על 📄 PDF בסרגל הכלים כדי לשמור כ-PDF ולשתף.', {
+        kind: 'info',
+        duration: 5000
+      });
+    });
   }
 
   // Pencil toolbar wiring. Pen mode also auto-collapses the math keypad —
@@ -2683,17 +2695,31 @@ export async function mountEditor(root, notebookId) {
     });
 
     // Commit on outside-tap. Listener is single-shot per popover so
-    // we don't have to track it across re-renders.
+    // we don't have to track it across re-renders. Critical: taps on
+    // the in-app keypad (.editor__keypad-host) and the keypad's
+    // show/hide chrome must NOT count as "outside" — the keypad is
+    // the kid's input device while the popover is open. Without this
+    // exemption, the very first keypad press fires this capture-phase
+    // handler before the bubble-phase routing reaches the popover, so
+    // the popover dismisses and the character ends up in a math cell.
     const outsideHandler = (event) => {
       if (!activeRowLabel || activeRowLabel.popover !== popover) {
         document.removeEventListener('pointerdown', outsideHandler, true);
         return;
       }
       if (popover.contains(event.target)) return;
-      if (event.target.closest && event.target.closest('.workblock__row-label')) {
-        // Tapping a different row-label gutter — let its own click
-        // handler fire openRowLabelEditor which will close+reopen for us.
-        return;
+      if (event.target.closest) {
+        if (event.target.closest('.workblock__row-label')) {
+          // Tapping a different row-label gutter — let its own click
+          // handler fire openRowLabelEditor which will close+reopen for us.
+          return;
+        }
+        if (event.target.closest('.editor__keypad-host') ||
+            event.target.closest('#keypad-show')) {
+          // Keypad press or keypad show/hide chrome — part of the
+          // popover's input flow, not a dismissal.
+          return;
+        }
       }
       document.removeEventListener('pointerdown', outsideHandler, true);
       closeRowLabelEditor({ commit: true });
@@ -2750,13 +2776,23 @@ export async function mountEditor(root, notebookId) {
     renderBlocks();
   }
 
+  // Returns the popover's input element whenever the row-label editor
+  // is open. We deliberately do NOT gate on document.activeElement
+  // matching the input — iPadOS Safari briefly moves focus to a
+  // tapped keypad button between pointerdown and click, even when the
+  // button mousedown-preventDefaults, and an activeElement check
+  // would then return null and route the keypress to a math cell.
+  // The popover is effectively modal while open (mutex with grid
+  // cursor, exercise label, and worksheet annotations), so as long
+  // as activeRowLabel is set we route to its input. handleRowLabelKey
+  // re-focuses the input before execCommand so the caret is always
+  // in the right place when the character lands.
   function getFocusedRowLabelInput() {
     if (!activeRowLabel || !activeRowLabel.popover) return null;
     const input = activeRowLabel.popover.querySelector(
       '.workblock__row-label-editor-input'
     );
-    if (!input) return null;
-    return document.activeElement === input ? input : null;
+    return input || null;
   }
 
   function handleRowLabelKey(inputEl, code) {
