@@ -1419,12 +1419,6 @@ h1 {
   width: 0;
   z-index: 0;
 }
-/* Toggle: when the kid turns alignment guides off in the toolbar, hide the
-   dashed verticals across every work block. */
-.editor--no-align-guides .grid__align-guide {
-  display: none;
-}
-
 /* Heavier line every 5 columns/rows for readability (like graph paper) */
 .cell[data-c="4"], .cell[data-c="9"], .cell[data-c="14"], .cell[data-c="19"] {
   border-right-color: #b8b8b8;

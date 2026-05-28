@@ -312,7 +312,6 @@ export async function mountEditor(root, notebookId) {
             <button class="btn btn--ghost" id="col-insert" aria-label="הוספת עמודה">➕↔ <span class="label">עמודה</span></button>
             <button class="btn btn--ghost" id="col-delete" aria-label="מחיקת עמודה">➖↔ <span class="label">עמודה</span></button>
           </span>
-          <button class="btn btn--ghost" id="toggle-align-guides" aria-label="קווי יישור">📏 <span class="label">קווי יישור</span></button>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="toggle-pen" aria-label="ציור">✏️ <span class="label">ציור</span></button>
           <span class="pen-tools" id="pen-tools" hidden>
@@ -464,20 +463,6 @@ export async function mountEditor(root, notebookId) {
     // and the kid would see the wrong worksheet+workblock pair. The
     // renderBlocks tail already schedules the canvas resize+replay.
     renderBlocks();
-  });
-
-  // Alignment-guide toggle: hides the dashed vertical lines through `=`/`<`/
-  // `>` columns. Defaults to ON (the original behaviour) but the kid can turn
-  // it off when the guides feel like clutter. Persisted in localStorage.
-  const alignGuidesBtn = document.getElementById('toggle-align-guides');
-  let alignGuidesOn = localStorage.getItem('mathapp.alignGuides') !== '0';
-  editorEl.classList.toggle('editor--no-align-guides', !alignGuidesOn);
-  alignGuidesBtn.classList.toggle('btn--active', alignGuidesOn);
-  alignGuidesBtn.addEventListener('click', () => {
-    alignGuidesOn = !alignGuidesOn;
-    localStorage.setItem('mathapp.alignGuides', alignGuidesOn ? '1' : '0');
-    editorEl.classList.toggle('editor--no-align-guides', !alignGuidesOn);
-    alignGuidesBtn.classList.toggle('btn--active', alignGuidesOn);
   });
 
   // Insert / delete row / column at the cursor's current position. Each acts
