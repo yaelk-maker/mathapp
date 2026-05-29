@@ -57,6 +57,7 @@ import { renderKeypad, keyboardEventToCode } from './input/keypad.js';
 import { renderHebrewKeypad } from './input/hebrew-keypad.js';
 import { renderEnglishKeypad } from './input/english-keypad.js';
 import { uploadWorksheet } from './io/import.js';
+import { exportSingleNotebookToJSON, shareJSON } from './io/export.js';
 import { attachPencilSurface } from './input/pencil.js';
 import { confirmDialog, promptDialog, notifySaveError, toast } from './ui/dialog.js';
 
@@ -299,7 +300,11 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת טקסט">📝 <span class="label">טקסט על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
-          <button class="btn btn--ghost" id="print-page" aria-label="הדפסה ושמירה כ-PDF" title="הדפסה, או שמירה כ-PDF ושיתוף דרך אפשרויות ה-iPad">🖨️ <span class="label">הדפסה</span></button>
+          <button class="btn btn--ghost" id="toggle-share" aria-label="שיתוף וייצוא" title="הדפסה, שמירה כ-PDF וגיבוי" aria-expanded="false">📤 <span class="label">שיתוף</span></button>
+          <span class="share-tools" id="share-tools" hidden>
+            <button class="btn btn--ghost" id="print-page" aria-label="הדפסה ושמירה כ-PDF" title="הדפסה, או שמירה כ-PDF ושיתוף דרך אפשרויות ה-iPad">🖨️ <span class="label">הדפסה / PDF</span></button>
+            <button class="btn btn--ghost" id="backup-notebook" aria-label="גיבוי המחברת" title="גיבוי המחברת לקובץ ושיתוף">💾 <span class="label">גיבוי</span></button>
+          </span>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="toggle-grid-tools" aria-label="שורות ועמודות" title="הוספה ומחיקה של שורות ועמודות" aria-expanded="false">▦ <span class="label">שורות ועמודות</span></button>
           <span class="grid-tools" id="grid-tools" hidden>
@@ -556,49 +561,55 @@ export async function mountEditor(root, notebookId) {
   window.addEventListener('afterprint', removePrintSnapshot);
   window.addEventListener('afterprint', restorePdfPrintLayout);
 
-  // Print AND "save as PDF" are the same iPadOS flow: window.print() opens
+  // Share / export menu: one toolbar button (📤) reveals print/PDF + backup,
+  // grouped because both are "do something with this whole notebook" actions
+  // (mirrors how the pen and row/column tools reveal behind their buttons).
+  const shareToolsEl = document.getElementById('share-tools');
+  const shareToggleBtn = document.getElementById('toggle-share');
+  function setShareToolsOpen(open) {
+    shareToolsEl.hidden = !open;
+    shareToggleBtn.classList.toggle('btn--active', open);
+    shareToggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  shareToggleBtn.addEventListener('click', () => setShareToolsOpen(shareToolsEl.hidden));
+
+  // Printing / "save as PDF" is the same iPadOS flow: window.print() opens
   // the native print sheet, whose top share button saves a PDF into Files /
-  // AirDrop / Mail. There used to be a separate 📄 PDF button, but it took
-  // the kid to this exact same sheet, so the two were merged into this one
-  // 🖨️ button. We always set pdfPrintIntent so the print/PDF output drops
-  // split mode and therefore contains every section (see the beforeprint /
-  // afterprint listeners above, which fire inside print()'s own task).
-  //
-  // The handler is intentionally just three statements: set the intent flag,
-  // fire the save flush (no await), call print(). Preserving the
-  // user-activation token Safari uses to decide whether print() was
-  // "user-initiated" is critical — once Safari has flagged a site as
-  // auto-printing, it pops the "automatic printing blocked" dialog for any
-  // call that isn't ABSOLUTELY clean.
+  // AirDrop / Mail. The click handler is intentionally just three statements:
+  // set the intent flag (so the beforeprint / afterprint listeners drop +
+  // restore split mode and the output contains every section), flush saves
+  // (no await), call print(). It runs synchronously inside the real tap so
+  // Safari keeps the user-activation token and doesn't block print().
   document.getElementById('print-page').addEventListener('click', () => {
+    setShareToolsOpen(false);
     pdfPrintIntent = true;
     flushSave();
     window.print();
   });
 
-  // Home-screen / folder-screen PDF entry: when the kid taps the "📄"
-  // button on a notebook card she's redirected into the editor with
-  // sessionStorage carrying the autoPdf flag. We can't programmatically
-  // click the toolbar button on arrival — iOS Safari requires print()
-  // to be triggered from a real user gesture, and a script-initiated
-  // click after a hash-change navigation no longer counts. Instead we
-  // surface a Hebrew toast telling the kid to tap 🖨️ הדפסה (which now also
-  // saves as PDF) and briefly pulse the toolbar button so it's easy to
-  // spot. The flag is consumed on read so a refresh doesn't loop.
-  if (sessionStorage.getItem('mathapp.autoPdf') === notebookId) {
-    sessionStorage.removeItem('mathapp.autoPdf');
-    requestAnimationFrame(() => {
-      const pdfBtn = document.getElementById('print-page');
-      if (pdfBtn) {
-        pdfBtn.classList.add('btn--pulse');
-        setTimeout(() => pdfBtn.classList.remove('btn--pulse'), 3200);
-      }
-      toast('הקישי על 🖨️ הדפסה בסרגל הכלים כדי לשמור כ-PDF ולשתף.', {
-        kind: 'info',
-        duration: 5000
+  // Backup this notebook to a JSON file and hand it to the iPad share sheet
+  // (Files / AirDrop / Drive). Moved here from the home-screen card so all
+  // "export this notebook" actions live together in the share menu.
+  document.getElementById('backup-notebook').addEventListener('click', async () => {
+    setShareToolsOpen(false);
+    try {
+      await flushSave();
+      const data = await exportSingleNotebookToJSON(notebookId);
+      const stamp = new Date().toISOString().slice(0, 10);
+      const safeName = (nb.name || 'notebook')
+        .replace(/[^\p{L}\p{N}_-]+/gu, '_')
+        .slice(0, 40);
+      await shareJSON(data, `mathapp-${safeName}-${stamp}.json`);
+    } catch (err) {
+      console.error('Single-notebook backup failed:', err);
+      await confirmDialog({
+        title: 'הגיבוי נכשל',
+        body: 'נסי שוב מאוחר יותר.',
+        confirmLabel: 'אישור',
+        cancelLabel: 'סגירה'
       });
-    });
-  }
+    }
+  });
 
   // Pencil toolbar wiring. Pen mode also auto-collapses the math keypad —
   // it isn't used while drawing and reclaiming that ~40% of vertical space

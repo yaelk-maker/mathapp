@@ -19,7 +19,6 @@ import {
 import { mountEditor } from './editor.js';
 import {
   exportNotebooksToJSON,
-  exportSingleNotebookToJSON,
   shareJSON,
   importNotebooksFromJSON,
   pickJSONFile,
@@ -307,8 +306,6 @@ function renderNotebookList(notebooks, query, { folders = [], emptyMessage } = {
                   <div class="notebook-card__meta">${formatDate(nb.updatedAt)}</div>
                 </div>
                 ${showMove ? `<button class="notebook-card__action" data-move="${nb.id}" aria-label="העברה לתיקייה" title="העברה לתיקייה">📁</button>` : ''}
-                <button class="notebook-card__action" data-save="${nb.id}" aria-label="גיבוי" title="גיבוי לדרייב">💾</button>
-                <button class="notebook-card__action" data-pdf="${nb.id}" aria-label="שמירה כ-PDF ושיתוף" title="שמירה כ-PDF ושיתוף">📄</button>
                 <button class="notebook-card__delete" data-delete="${nb.id}"
                         aria-label="מחק" title="העברה לנמחקו לאחרונה">✕</button>
               </div>
@@ -424,52 +421,12 @@ function wireListHandlers(listHost, { folders = [] } = {}) {
   for (const card of listHost.querySelectorAll('.notebook-card')) {
     card.addEventListener('click', (event) => {
       if (event.target.closest('[data-delete]') ||
-          event.target.closest('[data-save]') ||
-          event.target.closest('[data-pdf]') ||
           event.target.closest('[data-move]')) return;
       const id = card.getAttribute('data-id');
       window.location.hash = `#/notebook/${id}`;
     });
   }
 
-  for (const btn of listHost.querySelectorAll('[data-save]')) {
-    btn.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      const id = btn.getAttribute('data-save');
-      const nb = await getNotebook(id);
-      if (!nb) return;
-      try {
-        const data = await exportSingleNotebookToJSON(id);
-        const stamp = new Date().toISOString().slice(0, 10);
-        const safeName = (nb.name || 'notebook').replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 40);
-        await shareJSON(data, `mathapp-${safeName}-${stamp}.json`);
-      } catch (err) {
-        console.error('Single-notebook backup failed:', err);
-        await confirmDialog({
-          title: 'הגיבוי נכשל',
-          body: 'נסי שוב מאוחר יותר.',
-          confirmLabel: 'אישור',
-          cancelLabel: 'סגירה'
-        });
-      }
-    });
-  }
-
-  for (const btn of listHost.querySelectorAll('[data-pdf]')) {
-    btn.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      const id = btn.getAttribute('data-pdf');
-      // The editor owns the actual PDF generation (it knows the print
-      // layout, has the canvas snapshot logic, and can flush in-flight
-      // saves). From the home/folder card we hand off via sessionStorage:
-      // open the notebook, and once it has rendered the editor reads
-      // mathapp.autoPdf and auto-clicks the 📄 toolbar button. We key
-      // the flag on the notebook id so a stale flag from a different
-      // notebook can't auto-fire on the wrong one.
-      sessionStorage.setItem('mathapp.autoPdf', id);
-      window.location.hash = `#/notebook/${id}`;
-    });
-  }
 
   for (const btn of listHost.querySelectorAll('[data-move]')) {
     btn.addEventListener('click', async (event) => {
