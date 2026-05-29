@@ -290,10 +290,6 @@ export async function mountEditor(root, notebookId) {
           <button class="editor__back" id="back-home" aria-label="חזרה">← <span class="label">חזרה</span></button>
           <h2 class="editor__title" id="title"></h2>
           <button class="btn btn--ghost" id="rename"><span class="label">שנה שם</span></button>
-          <button class="editor__chrome-pin" id="chrome-pin" type="button"
-                  aria-label="נעץ סרגל" title="נעץ את הסרגל פתוח">📌</button>
-          <button class="editor__chrome-close" id="chrome-close" type="button"
-                  aria-label="סגור סרגל כלים" title="סגור סרגל כלים">×</button>
         </div>
         <div class="editor__actions">
           <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↺ <span class="label">ביטול</span></button>
@@ -325,6 +321,10 @@ export async function mountEditor(root, notebookId) {
             <button class="btn btn--ghost" id="clear-strokes" aria-label="נקה ציורים">🗑️ <span class="label">נקה ציורים</span></button>
           </span>
         </div>
+        <button class="editor__chrome-pin" id="chrome-pin" type="button"
+                aria-label="נעץ סרגל" title="נעץ את הסרגל פתוח">📌</button>
+        <button class="editor__chrome-close" id="chrome-close" type="button"
+                aria-label="סגור סרגל כלים" title="סגור סרגל כלים">×</button>
       </div>
       <div class="editor__section-bar" id="section-bar" hidden dir="rtl">
         <!-- dir="rtl" places "previous" (קודם) visually on the right and

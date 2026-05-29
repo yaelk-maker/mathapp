@@ -369,8 +369,14 @@ h1 {
 }
 
 .editor--full .editor__topbar {
-  margin-bottom: 8px;
+  /* Part of the single-line chrome row now, not its own row. It holds the
+     back button + title + rename and grows to absorb slack; the title
+     ellipsises so the whole bar stays on one line. */
+  margin-bottom: 0;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 8px;
 }
 
 /* --- Collapsible chrome (topbar + actions) ---
@@ -379,7 +385,15 @@ h1 {
    last interaction. On a kid's iPad this is the single biggest win for
    workspace size. */
 .editor__chrome {
-  display: contents;
+  /* One horizontal row: [back  title  rename] [tool icons] [📌] [×].
+     Everything the kid sees in the open toolbar lives on a single line so
+     the notebook below gets the maximum height. It only wraps to a second
+     line when a sub-toolbar (pen colours / row-column tools) is expanded. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 .editor--chrome-collapsed .editor__chrome {
   display: none;
@@ -415,7 +429,6 @@ h1 {
   display: none;
 }
 .editor__chrome-close {
-  margin-inline-start: auto;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--muted);
@@ -461,7 +474,8 @@ h1 {
 .editor__actions {
   display: flex;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
+  flex: 0 1 auto;
   /* Wrap to a second line when there isn't enough width for every button.
      Previously this was nowrap with horizontal scroll, but a kid's-app
      toolbar that the user can't see all of is a worse trade than letting
