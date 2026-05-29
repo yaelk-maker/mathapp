@@ -494,10 +494,11 @@ h1 {
   border-color: var(--accent);
 }
 
-/* Brief pulse to draw the kid's eye to the 📄 PDF button when she lands
-   in the editor via the home-screen PDF shortcut. iOS Safari blocks a
-   programmatic window.print() call after the navigation (no user
-   activation), so we point at the button instead of clicking for her. */
+/* Brief pulse to draw the kid's eye to the 🖨️ הדפסה button (which also
+   saves as PDF) when she lands in the editor via the home-screen PDF
+   shortcut. iOS Safari blocks a programmatic window.print() call after the
+   navigation (no user activation), so we point at the button instead of
+   clicking for her. */
 .btn--pulse {
   animation: btnPulse 800ms ease-in-out 4;
 }
@@ -513,6 +514,16 @@ h1 {
   flex-wrap: wrap;
 }
 .pen-tools[hidden] { display: none; }
+
+/* Row/column controls, revealed behind the "שורות ועמודות" button so they
+   don't take up permanent space in the toolbar. */
+.grid-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.grid-tools[hidden] { display: none; }
 
 .pen-color {
   width: 44px;
@@ -1396,22 +1407,6 @@ h1 {
   color: #111;
   position: relative;
   z-index: 1;
-}
-
-/* Faint vertical guide drawn through every column that holds a `=`/`>`/`<`/`≤`/
-   `≥`/`≠` cell. Helps the kid line up successive steps of an inequality without
-   manually counting columns. Pointer-events: none so taps still hit the cell. */
-.grid__align-guide {
-  pointer-events: none;
-  border-left: 1px dashed rgba(33, 99, 168, 0.32);
-  margin-left: calc(var(--cell-size) / 2);
-  width: 0;
-  z-index: 0;
-}
-/* Toggle: when the kid turns alignment guides off in the toolbar, hide the
-   dashed verticals across every work block. */
-.editor--no-align-guides .grid__align-guide {
-  display: none;
 }
 
 /* Heavier line every 5 columns/rows for readability (like graph paper) */

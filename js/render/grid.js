@@ -93,12 +93,6 @@ export function renderWorkBlock(block, options = {}) {
   // so the anchor's `grid-column: span N` actually has the columns to occupy.
   const occupied = occupiedCellSet(block);
 
-  // Columns containing a comparison/equality symbol — used to draw faint
-  // vertical alignment guides so the kid can stack `>`/`<`/`=` across solving
-  // steps without manually counting cells.
-  const ALIGN_CHARS = new Set(['=', '>', '<', '≤', '≥', '≠']);
-  const alignCols = new Set();
-
   for (let r = 0; r < block.rows; r += 1) {
     for (let c = 0; c < block.cols; c += 1) {
       if (occupied.has(`${r},${c}`)) continue;
@@ -127,10 +121,6 @@ export function renderWorkBlock(block, options = {}) {
       const isCursor = cursor && cursor.r === r && cursor.c === c;
       paintCell(cell, value, isCursor ? cursor.slot : null);
       if (isCursor) cell.classList.add('cell--cursor');
-
-      if (value && !isComposite(value) && ALIGN_CHARS.has(value.ch)) {
-        alignCols.add(c);
-      }
 
       grid.appendChild(cell);
     }
@@ -189,31 +179,6 @@ export function renderWorkBlock(block, options = {}) {
       });
     }
     grid.appendChild(overlay);
-  }
-
-  // Render a faint vertical guide for each column where a comparison symbol
-  // lives. Visual-only; click events fall through to the cells beneath via
-  // pointer-events: none. The guide spans only as far down as the deepest
-  // row with content (plus one row of headroom for the next step) — without
-  // the trim, the dashed line ran through every empty row at the bottom of
-  // the block and made the work area look full of grid lines.
-  let maxContentRow = -1;
-  for (const key of Object.keys(block.cells)) {
-    const r = Number(key.split(',')[0]);
-    if (r > maxContentRow) maxContentRow = r;
-  }
-  const guideRowSpan = Math.min(
-    block.rows,
-    maxContentRow >= 0 ? maxContentRow + 2 : 1
-  );
-  for (const col of alignCols) {
-    const guide = document.createElement('div');
-    guide.className = 'grid__align-guide';
-    guide.style.gridRowStart = 1;
-    guide.style.gridRowEnd = `span ${guideRowSpan}`;
-    guide.style.gridColumnStart = col + 1;
-    guide.style.gridColumnEnd = 'span 1';
-    grid.appendChild(guide);
   }
 
   // Long-press on a non-empty cell starts a "move part" drag — the kid
