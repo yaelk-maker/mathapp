@@ -521,6 +521,16 @@ h1 {
   50% { box-shadow: 0 0 0 6px rgba(11, 108, 242, 0.35); }
 }
 
+/* Share / export tools, revealed behind the 📤 button — print/PDF + backup
+   grouped together so they don't each take a permanent toolbar slot. */
+.share-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.share-tools[hidden] { display: none; }
+
 .pen-tools {
   display: inline-flex;
   align-items: center;
