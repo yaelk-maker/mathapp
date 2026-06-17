@@ -116,11 +116,35 @@ export function modeKey(title) {
   };
 }
 
+// Right-side navigation + keyboard-switch cluster occupying columns 8–9 of a
+// 9-column keypad grid, across all 5 rows:
+//   row 1: ⌫   row 2: ↑   row 3: ← →   row 4: ↓   row 5: 🌐
+// These are the exact same key definitions the math keypad lays out in its
+// last two columns, so the Hebrew/English keypads — which call this — get a
+// right strip that is pixel-for-pixel identical to the numeric one. Keys are
+// placed explicitly (the letter keypads fill columns 1–7 with their own rows,
+// so we can't rely on row-major auto-flow the way the math KEYS array does).
+export function appendNavCluster(grid, onKey) {
+  const place = (button, row, colStart, span) => {
+    const key = makeKey(button, onKey);
+    key.style.gridRow = String(row);
+    key.style.gridColumn = span > 1 ? `${colStart} / span ${span}` : String(colStart);
+    grid.appendChild(key);
+  };
+  place({ code: 'BACKSPACE', label: '⌫', kind: 'edit',
+          title: 'מחק (החזקה למחיקה רציפה)', repeat: true }, 1, 8, 2);
+  place({ code: 'UP', label: '↑', kind: 'nav' }, 2, 8, 2);
+  place({ code: 'LEFT', label: '←', kind: 'nav' }, 3, 8, 1);
+  place({ code: 'RIGHT', label: '→', kind: 'nav' }, 3, 9, 1);
+  place({ code: 'DOWN', label: '↓', kind: 'nav' }, 4, 8, 2);
+  place(modeKey('החלפת מקלדת'), 5, 8, 2);
+}
+
 export function buildSection(section, onKey) {
   // Legacy helper kept exported only because external code may still import
-  // it. The math keypad now lays out on a single 9×5 grid (see KEYS), but
-  // hebrew-keypad.js still uses makeKey/modeKey directly. Safe to remove
-  // once nothing outside this module imports buildSection.
+  // it. The math, Hebrew and English keypads now all lay out on the single
+  // 9×5 grid (math via KEYS, the letter keypads via their own rows plus
+  // appendNavCluster). Safe to remove once nothing else imports buildSection.
   const el = document.createElement('div');
   el.className = `keypad__section keypad__section--${section.name}`;
   el.style.gridTemplateColumns = `repeat(${section.cols}, 1fr)`;

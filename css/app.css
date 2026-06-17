@@ -1810,44 +1810,31 @@ h1 {
   min-height: 44px;
 }
 
-/* Hebrew keypad: a single column of rows — letters (3), a punctuation
-   strip, then a bottom action row that holds mode-toggle, wide Space and
-   the arrow cluster. The legacy right-side arrow section is gone; all
-   keys live in horizontal rows now. */
-.keypad--hebrew {
-  display: flex;
-  flex-direction: column;
-}
-.keypad__letters {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
+/* Hebrew & English keypads share the math keypad's 9-column × 5-row grid
+   (.keypad__grid) so their right strip — the ⌫/↑/←→/↓/🌐 cluster in columns
+   8–9 — is identical to the numeric keypad and the keypads are the same
+   height. The block display lets the inner .keypad__grid own the layout. */
+.keypad--hebrew,
+.keypad--english {
+  display: block;
+  width: 100%;
 }
 
-.keypad__row {
+/* A content row spanning columns 1–7 of the letters grid. Its keys live in
+   a flex row so they share the 7-column width evenly however many there are
+   (Hebrew's longest row is 10 letters). */
+.keypad__gridrow {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   align-items: stretch;
-}
-
-.keypad__row--punct .keypad__key {
-  flex: 1 1 0;
   min-width: 0;
-  min-height: 44px;
 }
-
-/* Bottom row weights: mode 1 / space 4 / each arrow 1 — keys end up the
-   same width as a punctuation key, with Space dominating the middle. */
-.keypad__row--bottom .keypad__key {
+/* Three-class selector so these beat the `.keypad__grid .keypad__key`
+   rule below (which pins direct grid children to width:100%). */
+.keypad__grid .keypad__gridrow .keypad__key {
   flex: 1 1 0;
+  width: auto;
   min-width: 0;
-  min-height: 48px;
-}
-.keypad__row--bottom .keypad__key--space {
-  flex: 4 1 0;
-  font-weight: 500;
 }
 
 .keypad__key {
@@ -2639,10 +2626,6 @@ body.system-kbd-up .editor__keypad-host {
    The visual state of the key indicates which mode is active so the kid
    always sees whether the next press will produce an uppercase letter. */
 
-.keypad--english {
-  display: flex;
-  flex-direction: column;
-}
 .keypad--english .keypad__key {
   font-family: -apple-system, "Helvetica Neue", "Arial", sans-serif;
   font-size: 1.25rem;
