@@ -1798,7 +1798,13 @@ h1 {
 .keypad__grid {
   display: grid;
   grid-template-columns: repeat(9, 1fr);
-  grid-auto-rows: minmax(46px, 1fr);
+  /* Uniform row height shared by the math, Hebrew and English keypads. The
+     floor clears the tallest key — the stacked a/b fraction glyph (~57px
+     border-box) — so every row is the same height in all three keypads.
+     Without a floor this high, the `1fr` rows on the math keypad grew to fit
+     the fraction key while the letter keypads (single-char keys) sat at the
+     old 46px minimum, leaving the two keypads visibly different heights. */
+  grid-auto-rows: minmax(60px, 1fr);
   gap: 5px;
   width: 100%;
 }
