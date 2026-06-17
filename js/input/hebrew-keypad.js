@@ -28,7 +28,7 @@ const LETTER_ROWS = [
   ['ז', 'ס', 'ב', 'ה', 'נ', 'מ', 'צ', 'ת', 'ץ']
 ];
 
-const PUNCTUATION = ['!', ':', '.', ',', '/', '(', ')'];
+const PUNCTUATION = ['!', ':', '.', ',', '/', '(', ')', "'", '-'];
 
 export function renderHebrewKeypad({ onKey }) {
   const wrapper = document.createElement('div');
