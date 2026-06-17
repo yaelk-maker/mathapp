@@ -184,6 +184,18 @@ export async function purgeNotebookFromTrash(id) {
   await db.delete('trash', id);
 }
 
+// Purge every trashed notebook in one shot — backs the "empty trash" button.
+// Deletes id-by-id (mirroring purgeExpiredTrash) so we don't depend on a
+// store-clear helper. Returns the number purged.
+export async function purgeAllTrash() {
+  const db = await getDB();
+  const all = await db.getAll('trash');
+  for (const entry of all) {
+    await db.delete('trash', entry.id);
+  }
+  return all.length;
+}
+
 // Drop trash entries older than TRASH_TTL_MS. Called once on app start so the
 // kid doesn't have to think about cleanup. Returns the number purged.
 export async function purgeExpiredTrash(now = Date.now()) {

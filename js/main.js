@@ -6,6 +6,7 @@ import {
   listTrash,
   restoreNotebookFromTrash,
   purgeNotebookFromTrash,
+  purgeAllTrash,
   purgeExpiredTrash,
   requestPersistentStorage,
   listFolders,
@@ -579,6 +580,9 @@ async function renderTrash() {
     <div class="screen">
       <div class="toolbar">
         <button class="btn btn--ghost" id="trash-back">→ חזרה</button>
+        ${entries.length > 0
+          ? `<button class="btn btn--ghost" id="trash-empty">🗑️ רוקן סל</button>`
+          : ''}
       </div>
       <h1>נמחקו לאחרונה</h1>
       <p class="trash-hint">מחברות נמחקות לצמיתות אחרי 30 יום.</p>
@@ -589,6 +593,31 @@ async function renderTrash() {
   document.getElementById('trash-back').addEventListener('click', () => {
     window.location.hash = '';
   });
+
+  // Empty the whole bin in one click. Purge is irreversible (the snapshot
+  // blobs are dropped), so it's gated behind a destructive confirm that
+  // states how many notebooks will be permanently deleted.
+  const emptyBtn = document.getElementById('trash-empty');
+  if (emptyBtn) {
+    emptyBtn.addEventListener('click', async () => {
+      const ok = await confirmDialog({
+        title: 'ריקון הסל',
+        body: `למחוק לצמיתות את כל ${entries.length} המחברות בסל? אי אפשר לשחזר אחרי הפעולה הזו.`,
+        confirmLabel: 'כן, מחקי הכל',
+        cancelLabel: 'ביטול',
+        destructive: true
+      });
+      if (!ok) return;
+      try {
+        await purgeAllTrash();
+        toast('הסל רוקן.');
+        await renderTrash();
+      } catch (err) {
+        console.error('Empty trash failed:', err);
+        toast('ריקון הסל נכשל — נסי שוב.', { kind: 'error', duration: 3600 });
+      }
+    });
+  }
 
   wireTrashHandlers(document.getElementById('trash-list-host'));
 }
