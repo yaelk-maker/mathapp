@@ -72,9 +72,9 @@ const KEYS = [
   { code: '%', label: '%', kind: 'op' },
   { code: 'ABS', label: '|a|', kind: 'comp', title: 'ערך מוחלט' },
   { code: 'SPACE', label: 'Space', kind: 'space', span: 4 },
-  // Mode toggle inherits modeKey's stacked ABC/123 glyph; span 2 so it
-  // matches ⌫'s footprint directly above it.
-  Object.assign({}, modeKey('מקלדת עברית'), { span: 2 })
+  // Mode toggle inherits modeKey's globe glyph; span 2 so it matches ⌫'s
+  // footprint directly above it. One globe cycles math → hebrew → english.
+  Object.assign({}, modeKey('החלפת מקלדת'), { span: 2 })
 ];
 
 export function renderKeypad({ onKey }) {
