@@ -3578,10 +3578,26 @@ export async function mountEditor(root, notebookId) {
   // Down arrow: always drop to the FIRST cell of the row below, where "first"
   // is direction-aware (left for LTR, right for RTL Hebrew). Exits any
   // composite slot first so it behaves as a predictable line-feed rather than
-  // navigating inside a fraction/power.
-  function arrowDownToRowStart() {
+  // navigating inside a fraction/power. At the LAST row it grows the block by
+  // one and lands on the new row, so the kid can keep going down without
+  // reaching for the ➕↕ button (capped at the 40-row resize-handle max).
+  async function arrowDownToRowStart() {
     if (!activeWorkBlock) return;
     cursor.slot = null;
+    if (cursor.r >= activeWorkBlock.rows - 1) {
+      if (activeWorkBlock.rows >= 40) {
+        toast('הגעת למספר השורות המרבי.', { kind: 'warn', duration: 2400 });
+        moveCursor(cursor.r, rowStartCol());
+        return;
+      }
+      pushUndo();
+      activeWorkBlock.rows += 1;
+      cursor.r = activeWorkBlock.rows - 1;
+      cursor.c = clamp(rowStartCol(), MARGIN_COLS, activeWorkBlock.cols - 1);
+      await savePage(page);
+      await renderBlocks();
+      return;
+    }
     moveCursor(cursor.r + 1, rowStartCol());
   }
 
