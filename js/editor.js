@@ -3575,14 +3575,32 @@ export async function mountEditor(root, notebookId) {
     return keypadMode === 'hebrew' ? activeWorkBlock.cols - 1 : MARGIN_COLS;
   }
 
-  // Down arrow: always drop to the FIRST cell of the row below, where "first"
-  // is direction-aware (left for LTR, right for RTL Hebrew). Exits any
-  // composite slot first so it behaves as a predictable line-feed rather than
-  // navigating inside a fraction/power. At the LAST row it grows the block by
-  // one and lands on the new row, so the kid can keep going down without
-  // reaching for the ➕↕ button (capped at the 40-row resize-handle max).
+  // Down arrow. Inside a fraction/power/root it steps DOWN within the
+  // composite (e.g. numerator → denominator) and stays in the same cell.
+  // Otherwise it drops to the FIRST cell of the row below — direction-aware
+  // (left for LTR, right for RTL Hebrew) — and at the LAST row it grows the
+  // block by one and lands on the new row, so the kid can keep going down
+  // without reaching for the ➕↕ button (capped at the 40-row resize max).
   async function arrowDownToRowStart() {
     if (!activeWorkBlock) return;
+    // Step within a composite first; only fall through to the line-feed when
+    // there's no lower slot to move into (mirrors arrowVertical's ↓ mapping).
+    if (cursor.slot) {
+      const cell = getCellAt(cursor.r, cursor.c);
+      if (isComposite(cell)) {
+        const slots = compositeSlots(cell);
+        const idx = slots.indexOf(cursor.slot);
+        let nextIdx = -1;
+        if (cell.type === 'fraction') nextIdx = idx < slots.length - 1 ? idx + 1 : -1;
+        else if (cell.type === 'pow') nextIdx = idx === 1 ? 0 : -1;
+        else if (cell.type === 'nroot') nextIdx = idx === 0 ? 1 : -1;
+        if (nextIdx !== -1) {
+          cursor.slot = slots[nextIdx];
+          repaintCell(cursor.r, cursor.c);
+          return;
+        }
+      }
+    }
     cursor.slot = null;
     if (cursor.r >= activeWorkBlock.rows - 1) {
       if (activeWorkBlock.rows >= 40) {
