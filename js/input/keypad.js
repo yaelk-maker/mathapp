@@ -15,6 +15,18 @@
 // `≥`; the standalone keys are gone with a small superscript hint left
 // behind on `<` and `>`.
 
+// iPadOS-style globe glyph for the keyboard-switch key. Declared before KEYS
+// because KEYS calls modeKey() at module-eval time, and modeKey reads this —
+// a `const` after KEYS would be in its temporal dead zone and throw on load.
+const GLOBE_SVG =
+    '<svg class="keypad__globe" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+  + '<circle cx="12" cy="12" r="9"/>'
+  + '<ellipse cx="12" cy="12" rx="4" ry="9"/>'
+  + '<line x1="3" y1="12" x2="21" y2="12"/>'
+  + '<line x1="4.6" y1="6.8" x2="19.4" y2="6.8"/>'
+  + '<line x1="4.6" y1="17.2" x2="19.4" y2="17.2"/>'
+  + '</svg>';
+
 const KEYS = [
   // ── Row 1 ────────────────────────────────────────────────────────────
   { code: 'SQUARE', label: 'a²', kind: 'comp', title: 'בריבוע' },
@@ -95,15 +107,6 @@ export function renderKeypad({ onKey }) {
 // the kid recognises it as a keyboard-mode toggle rather than a character
 // key. Inline SVG draws on currentColor so the per-mode tints (Hebrew /
 // English) still recolour it.
-const GLOBE_SVG =
-    '<svg class="keypad__globe" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
-  + '<circle cx="12" cy="12" r="9"/>'
-  + '<ellipse cx="12" cy="12" rx="4" ry="9"/>'
-  + '<line x1="3" y1="12" x2="21" y2="12"/>'
-  + '<line x1="4.6" y1="6.8" x2="19.4" y2="6.8"/>'
-  + '<line x1="4.6" y1="17.2" x2="19.4" y2="17.2"/>'
-  + '</svg>';
-
 export function modeKey(title) {
   return {
     code: 'TOGGLE_KEYPAD',
