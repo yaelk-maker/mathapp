@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v58';
+const CACHE = 'mathapp-shell-v59';
 const SHELL = [
   './',
   './index.html',
@@ -60,15 +60,17 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch strategy:
-//   - HTML / navigation requests: network-first, fall back to cached
-//     index.html when offline. This way every page load on a live
-//     connection picks up the latest shell — the kid never gets
-//     stuck on an old build because the SW was caching index.html
-//     too aggressively.
-//   - JS / CSS / images: stale-while-revalidate. Serve cached
-//     immediately for speed, then fetch a fresh copy in the
-//     background and update the cache so the next load is current.
+// Fetch strategy — NETWORK-FIRST for every same-origin GET (HTML, JS, CSS,
+// images), with the precached shell as the offline fallback:
+//   - Online: always fetch the live file and refresh the cache, so a deploy
+//     is picked up on the very next launch. Previously JS/CSS were served
+//     stale-while-revalidate, which left the installed PWA a load (or more)
+//     behind after every deploy — a fix would land on the server but the kid
+//     kept running the old cached build until a second reload happened to
+//     swap it in. Network-first removes that lag entirely and means we no
+//     longer depend on bumping the cache version to ship a change.
+//   - Offline / fetch failure: fall back to the cached copy (and to
+//     index.html for navigations) so the app still opens with no connection.
 //   - Cross-origin requests: passthrough (browser handles them).
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
@@ -81,35 +83,22 @@ self.addEventListener('fetch', (event) => {
     url.pathname.endsWith('/') ||
     url.pathname.endsWith('.html');
 
-  if (isHTML) {
-    event.respondWith(
-      fetch(event.request)
-        .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const clone = res.clone();
-            caches.open(CACHE).then((c) => c.put('./index.html', clone));
-          }
-          return res;
-        })
-        .catch(() =>
-          caches.match(event.request).then((hit) => hit || caches.match('./index.html'))
-        )
-    );
-    return;
-  }
-
   event.respondWith(
-    caches.match(event.request).then((hit) => {
-      const networked = fetch(event.request)
-        .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const clone = res.clone();
-            caches.open(CACHE).then((c) => c.put(event.request, clone));
-          }
-          return res;
-        })
-        .catch(() => null);
-      return hit || networked || caches.match('./index.html');
-    })
+    fetch(event.request)
+      .then((res) => {
+        if (res && res.status === 200 && res.type === 'basic') {
+          const clone = res.clone();
+          // Navigations are cached under './index.html' so the SPA shell is
+          // always available offline regardless of the requested route.
+          const key = isHTML ? './index.html' : event.request;
+          caches.open(CACHE).then((c) => c.put(key, clone));
+        }
+        return res;
+      })
+      .catch(() =>
+        caches.match(event.request).then(
+          (hit) => hit || (isHTML ? caches.match('./index.html') : undefined)
+        )
+      )
   );
 });
