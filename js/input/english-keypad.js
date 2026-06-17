@@ -1,26 +1,31 @@
 // English on-screen keyboard. Layout matches the iPadOS English keyboard so
-// muscle memory carries over: three letter rows (10/9/9), a punctuation
-// strip, then a bottom action row.
+// muscle memory carries over: three letter rows (10/9/8-with-shift), a signs
+// row, and a wide Space.
 //
-//   Row 1: q w e r t y u i o p
-//   Row 2:  a s d f g h j k l
-//   Row 3: ⇧ z x c v b n m ⌫
-//   Row 4: ! : . / ( )            (punctuation strip)
-//   Row 5: 🌐 globe | space (wide) | ↑ ← ↓ →
+// The keypad shares the math keypad's 9-column × 5-row grid. Columns 1–7
+// hold the content (a signs row on top, three letter rows, then a wide
+// Space), and columns 8–9 hold the navigation/globe cluster via
+// appendNavCluster — so the right strip is identical to the numeric keypad
+// and the two keypads are the same height.
+//
+//   Row 1 (cols 1–7): signs  ! : . , / ( )        | ⌫
+//   Row 2 (cols 1–7): q w e r t y u i o p          | ↑
+//   Row 3 (cols 1–7): a s d f g h j k l            | ← →
+//   Row 4 (cols 1–7): ⇧ z x c v b n m              | ↓
+//   Row 5 (cols 1–7): [ space (wide) ]             | 🌐
 //
 // Each letter key emits its lowercase glyph by default. The shift key on
-// row 3 cycles through three states: off → shift (one capital) → caps lock
-// (all caps until tapped off). The visual state of the shift key always
-// shows which mode is active so the kid sees whether the next press will
-// produce uppercase.
+// the bottom letter row cycles through three states: off → shift (one
+// capital) → caps lock (all caps until tapped off). The visual state of the
+// shift key always shows which mode is active.
 //
 // Press codes emitted via onKey:
 //   - Letters: 'a'..'z' or 'A'..'Z' depending on shift state
-//   - Punctuation: '!', ':', '.', '/', '(', ')'
+//   - Punctuation: '!', ':', '.', ',', '/', '(', ')'
 //   - Actions: 'BACKSPACE', 'SPACE', 'LEFT', 'RIGHT', 'UP', 'DOWN',
 //              'TOGGLE_KEYPAD' (globe — cycles to the next keyboard)
 
-import { makeKey, modeKey } from './keypad.js';
+import { makeKey, appendNavCluster } from './keypad.js';
 
 const LETTER_ROWS = [
   ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
@@ -44,8 +49,8 @@ export function renderEnglishKeypad({ onKey }) {
 
   let shiftState = SHIFT_OFF;
 
-  const lettersBlock = document.createElement('div');
-  lettersBlock.className = 'keypad__letters';
+  const grid = document.createElement('div');
+  grid.className = 'keypad__grid keypad__grid--letters';
 
   // Per-letter button refs so we can mutate the displayed glyph (upper vs
   // lower) when shift state changes without rebuilding the entire keypad.
@@ -58,83 +63,70 @@ export function renderEnglishKeypad({ onKey }) {
     }
   }
 
-  // Letter rows. Each letter button reads shiftState at click time so the
-  // emitted character reflects the current toggle. After a one-shot shift
-  // emits a single capital, drop back to off automatically (mirrors iPadOS).
-  LETTER_ROWS.forEach((letters, rowIndex) => {
-    const rowEl = document.createElement('div');
-    rowEl.className = 'keypad__row';
-
-    // Shift sits at the start of the bottom letter row, matching iPadOS.
-    if (rowIndex === 2) {
-      const shiftBtn = makeShiftKey(() => shiftState, (next) => {
-        shiftState = next;
-        applyShiftStyles(shiftBtn, shiftState);
-        applyShiftToLetters();
-      });
-      rowEl.appendChild(shiftBtn);
-      // Initial style so the lit/unlit state matches shiftState before any
-      // taps (always SHIFT_OFF on first render, but explicit is safer for
-      // future re-mounts).
-      applyShiftStyles(shiftBtn, shiftState);
+  // Row 1: signs (punctuation) strip across columns 1–7.
+  contentRow(grid, 1, (row) => {
+    for (const ch of PUNCTUATION) {
+      row.appendChild(makeKey({ code: ch, label: ch, kind: 'op' }, onKey));
     }
-
-    for (const ch of letters) {
-      const btn = makeKey({
-        code: ch,
-        label: ch,
-        kind: 'letter'
-      }, () => {
-        const upper = shiftState !== SHIFT_OFF;
-        onKey(upper ? ch.toUpperCase() : ch);
-        if (shiftState === SHIFT_ONCE) {
-          shiftState = SHIFT_OFF;
-          const shiftBtn = wrapper.querySelector('.keypad__key--shift');
-          if (shiftBtn) applyShiftStyles(shiftBtn, shiftState);
-          applyShiftToLetters();
-        }
-      });
-      letterButtons.push({ btn, ch });
-      rowEl.appendChild(btn);
-    }
-
-    // Backspace lives at the right end of the bottom letter row, mirroring
-    // the iPadOS English keyboard.
-    if (rowIndex === 2) {
-      rowEl.appendChild(makeKey({
-        code: 'BACKSPACE',
-        label: '⌫',
-        kind: 'edit',
-        title: 'מחק (החזקה למחיקה רציפה)',
-        repeat: true
-      }, onKey));
-    }
-
-    lettersBlock.appendChild(rowEl);
   });
 
-  // Punctuation row.
-  const punctRow = document.createElement('div');
-  punctRow.className = 'keypad__row keypad__row--punct';
-  for (const ch of PUNCTUATION) {
-    punctRow.appendChild(makeKey({ code: ch, label: ch, kind: 'op' }, onKey));
-  }
-  lettersBlock.appendChild(punctRow);
+  // Rows 2–4: letter rows across columns 1–7. The bottom letter row leads
+  // with the shift key (matching iPadOS). Each letter button reads shiftState
+  // at click time and a one-shot shift drops back to off after one capital.
+  LETTER_ROWS.forEach((letters, rowIndex) => {
+    contentRow(grid, rowIndex + 2, (row) => {
+      if (rowIndex === 2) {
+        const shiftBtn = makeShiftKey(() => shiftState, (next) => {
+          shiftState = next;
+          applyShiftStyles(shiftBtn, shiftState);
+          applyShiftToLetters();
+        });
+        row.appendChild(shiftBtn);
+        applyShiftStyles(shiftBtn, shiftState);
+      }
 
-  // Bottom action row: globe (cycles keyboards), wide Space, ↑ ← ↓ →.
-  // One globe steps through math → hebrew → english → math (iPadOS-style).
-  const actionRow = document.createElement('div');
-  actionRow.className = 'keypad__row keypad__row--bottom';
-  actionRow.appendChild(makeKey(modeKey('החלפת מקלדת'), onKey));
-  actionRow.appendChild(makeKey({ code: 'SPACE', label: 'space', kind: 'space' }, onKey));
-  actionRow.appendChild(makeKey({ code: 'UP', label: '↑', kind: 'nav' }, onKey));
-  actionRow.appendChild(makeKey({ code: 'LEFT', label: '←', kind: 'nav' }, onKey));
-  actionRow.appendChild(makeKey({ code: 'DOWN', label: '↓', kind: 'nav' }, onKey));
-  actionRow.appendChild(makeKey({ code: 'RIGHT', label: '→', kind: 'nav' }, onKey));
-  lettersBlock.appendChild(actionRow);
+      for (const ch of letters) {
+        const btn = makeKey({ code: ch, label: ch, kind: 'letter' }, () => {
+          const upper = shiftState !== SHIFT_OFF;
+          onKey(upper ? ch.toUpperCase() : ch);
+          if (shiftState === SHIFT_ONCE) {
+            shiftState = SHIFT_OFF;
+            const shiftBtn = wrapper.querySelector('.keypad__key--shift');
+            if (shiftBtn) applyShiftStyles(shiftBtn, shiftState);
+            applyShiftToLetters();
+          }
+        });
+        letterButtons.push({ btn, ch });
+        row.appendChild(btn);
+      }
+    });
+  });
 
-  wrapper.appendChild(lettersBlock);
+  // Row 5: wide Space across columns 1–7.
+  const space = makeKey({ code: 'SPACE', label: 'space', kind: 'space' }, onKey);
+  space.style.gridRow = '5';
+  space.style.gridColumn = '1 / span 7';
+  grid.appendChild(space);
+
+  // Columns 8–9: the shared ⌫/↑/←→/↓/🌐 cluster, identical to the numeric
+  // keypad's right strip.
+  appendNavCluster(grid, onKey);
+
+  wrapper.appendChild(grid);
   return wrapper;
+}
+
+// A content row that spans columns 1–7 of the grid at the given row number.
+// The keys inside live in a flex row so they stretch to share the 7-column
+// width regardless of how many there are.
+function contentRow(grid, rowNum, fill) {
+  const row = document.createElement('div');
+  row.className = 'keypad__gridrow';
+  row.style.gridRow = String(rowNum);
+  row.style.gridColumn = '1 / span 7';
+  fill(row);
+  grid.appendChild(row);
+  return row;
 }
 
 // Shift key — single tap advances off → once → locked → off. The caller
