@@ -826,6 +826,13 @@ export async function mountEditor(root, notebookId) {
   function setKeypadMode(mode) {
     if (mode === keypadMode) return;
     keypadMode = mode;
+    // Move the cursor to the side the new keypad writes from — right edge for
+    // RTL Hebrew, left (first writable column) for LTR math/English — so the
+    // kid starts typing from the correct margin without repositioning by hand.
+    if (activeWorkBlock) {
+      cursor.slot = null;
+      moveCursor(cursor.r, mode === 'hebrew' ? activeWorkBlock.cols - 1 : MARGIN_COLS);
+    }
     mountKeypad();
     requestAnimationFrame(() => resizeAndReplay());
   }
@@ -2153,7 +2160,7 @@ export async function mountEditor(root, notebookId) {
       case 'LEFT': arrowHorizontal(-1); return;
       case 'RIGHT': arrowHorizontal(1); return;
       case 'UP': arrowVertical(-1); return;
-      case 'DOWN': arrowVertical(1); return;
+      case 'DOWN': arrowDownToRowStart(); return;
       default:
         // Single Hebrew letter or punctuation — insert as a one-char atom
         // and advance the cursor LEFT so the next letter lands to the
@@ -2191,7 +2198,7 @@ export async function mountEditor(root, notebookId) {
       case 'LEFT': arrowHorizontal(-1); return;
       case 'RIGHT': arrowHorizontal(1); return;
       case 'UP': arrowVertical(-1); return;
-      case 'DOWN': arrowVertical(1); return;
+      case 'DOWN': arrowDownToRowStart(); return;
       default:
         // Single English letter or punctuation. insertChar already handles
         // shift-row-right when overwriting, edge refusal, and queueSave.
@@ -2325,7 +2332,7 @@ export async function mountEditor(root, notebookId) {
       case 'LEFT': arrowHorizontal(-1); break;
       case 'RIGHT': arrowHorizontal(1); break;
       case 'UP': arrowVertical(-1); break;
-      case 'DOWN': arrowVertical(1); break;
+      case 'DOWN': arrowDownToRowStart(); break;
       case 'EXIT': exitComposite(1); break;
       // Space in math mode advances the cursor right — it doesn't insert a
       // visible space character, since math cells are single atoms.
@@ -3559,6 +3566,23 @@ export async function mountEditor(root, notebookId) {
       const occupyingAnchor = findOccupyingAnchor(activeWorkBlock, cursor.r, targetC);
       moveCursor(cursor.r, occupyingAnchor ? occupyingAnchor.c : targetC);
     }
+  }
+
+  // First writable cell of a row, honouring the active keypad's text
+  // direction: leftmost (MARGIN_COLS) for the LTR math/English keypads,
+  // rightmost (cols-1) for the RTL Hebrew keypad.
+  function rowStartCol() {
+    return keypadMode === 'hebrew' ? activeWorkBlock.cols - 1 : MARGIN_COLS;
+  }
+
+  // Down arrow: always drop to the FIRST cell of the row below, where "first"
+  // is direction-aware (left for LTR, right for RTL Hebrew). Exits any
+  // composite slot first so it behaves as a predictable line-feed rather than
+  // navigating inside a fraction/power.
+  function arrowDownToRowStart() {
+    if (!activeWorkBlock) return;
+    cursor.slot = null;
+    moveCursor(cursor.r + 1, rowStartCol());
   }
 
   function arrowVertical(dir) {
