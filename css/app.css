@@ -2638,6 +2638,29 @@ body.system-kbd-up .editor__keypad-host {
   font-weight: 500;
   text-transform: none;
 }
+
+/* The shared right-strip cluster (arrows ↑←↓→ and the ⌫ backspace) must
+   render identically to the numeric keypad. The Hebrew/English letter-font
+   overrides above otherwise leak onto these keys (different family, and
+   English even forces weight 500), so the same glyph looks different per
+   keypad. Restore the base monospace family, weight and the numeric sizes —
+   placed after both letter-font rules so it wins on source order. */
+.keypad--hebrew .keypad__key--nav,
+.keypad--english .keypad__key--nav,
+.keypad--hebrew .keypad__key--edit,
+.keypad--english .keypad__key--edit {
+  font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  font-weight: 600;
+}
+.keypad--hebrew .keypad__key--nav,
+.keypad--english .keypad__key--nav {
+  font-size: 1.25rem;
+}
+.keypad--hebrew .keypad__key--edit,
+.keypad--english .keypad__key--edit {
+  font-size: 1.375rem;
+}
+
 .keypad__key--shift {
   color: var(--accent);
   background: #f7faff;
