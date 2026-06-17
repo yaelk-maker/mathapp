@@ -244,16 +244,17 @@ export async function mountEditor(root, notebookId) {
   // in their respective on-screen layouts and route presses into the active
   // work block's grid (one letter per cell, just like math digits).
   //
-  // Toggling: the math keypad's ABC/123 key hops to `lastAlphaMode` (the
-  // alphabet the kid was last in). The Hebrew and English keypads each
-  // have THREE escape keys — back to math (TOGGLE_KEYPAD), and a one-tap
-  // hop to the OTHER alphabet (TOGGLE_HEBREW / TOGGLE_ENGLISH). So the
-  // kid can always reach any of the three modes in at most two taps.
+  // Toggling: every keypad carries a single globe key (TOGGLE_KEYPAD) that
+  // cycles through the modes in KEYPAD_CYCLE order — like the iPadOS globe.
+  // math → hebrew → english → math. Hebrew comes first out of math because
+  // the kid is a Hebrew-first speaker, and any mode is reachable in at most
+  // two taps.
   let keypadMode = 'math';
-  // Default `lastAlphaMode` is Hebrew because the kid is a Hebrew-first
-  // speaker — first time she taps ABC/123 from math, she should land
-  // on the Hebrew keypad rather than English. (Bilingual QA suggestion.)
-  let lastAlphaMode = 'hebrew';
+  const KEYPAD_CYCLE = ['math', 'hebrew', 'english'];
+  function nextKeypadMode() {
+    const i = KEYPAD_CYCLE.indexOf(keypadMode);
+    return KEYPAD_CYCLE[(i + 1) % KEYPAD_CYCLE.length];
+  }
 
   // Drawing state
   const strokes = await listStrokesByPage(page.id);
@@ -825,7 +826,6 @@ export async function mountEditor(root, notebookId) {
   function setKeypadMode(mode) {
     if (mode === keypadMode) return;
     keypadMode = mode;
-    if (mode === 'hebrew' || mode === 'english') lastAlphaMode = mode;
     mountKeypad();
     requestAnimationFrame(() => resizeAndReplay());
   }
@@ -2117,11 +2117,7 @@ export async function mountEditor(root, notebookId) {
   // freely so the kid can fix a single letter without deleting through.
   function handleHebrewKey(code) {
     if (code === 'TOGGLE_KEYPAD') {
-      setKeypadMode('math');
-      return;
-    }
-    if (code === 'TOGGLE_ENGLISH') {
-      setKeypadMode('english');
+      setKeypadMode(nextKeypadMode());
       return;
     }
     // Row-label popover has focus — route presses there. Same pattern
@@ -2171,11 +2167,7 @@ export async function mountEditor(root, notebookId) {
   // cell and the cursor advances to the right — same direction as math.
   function handleEnglishKey(code) {
     if (code === 'TOGGLE_KEYPAD') {
-      setKeypadMode('math');
-      return;
-    }
-    if (code === 'TOGGLE_HEBREW') {
-      setKeypadMode('hebrew');
+      setKeypadMode(nextKeypadMode());
       return;
     }
     const rowLabelInput = getFocusedRowLabelInput();
@@ -2309,7 +2301,7 @@ export async function mountEditor(root, notebookId) {
 
   function handleKey(code) {
     if (code === 'TOGGLE_KEYPAD') {
-      setKeypadMode(lastAlphaMode);
+      setKeypadMode(nextKeypadMode());
       return;
     }
     const rowLabelInput = getFocusedRowLabelInput();
@@ -2581,7 +2573,7 @@ export async function mountEditor(root, notebookId) {
     // Mode toggles bubble through the dispatcher above this; arrow keys,
     // SPACE, and composite codes don't make sense inside the short label
     // chip so we silently swallow them rather than emitting garbage text.
-    if (code === 'TOGGLE_KEYPAD' || code === 'TOGGLE_ENGLISH' || code === 'TOGGLE_HEBREW') return;
+    if (code === 'TOGGLE_KEYPAD') return;
     if (code === 'LEFT' || code === 'RIGHT' || code === 'UP' || code === 'DOWN') return;
     if (code === 'SPACE') return;
     // Anything that's a single character (digit, Hebrew letter, ASCII
@@ -2844,7 +2836,7 @@ export async function mountEditor(root, notebookId) {
     }
     // Mode toggles bubble through the dispatcher above; arrow keys
     // and composite codes don't make sense in a short label so swallow.
-    if (code === 'TOGGLE_KEYPAD' || code === 'TOGGLE_ENGLISH' || code === 'TOGGLE_HEBREW') return;
+    if (code === 'TOGGLE_KEYPAD') return;
     if (code === 'LEFT' || code === 'RIGHT' || code === 'UP' || code === 'DOWN') return;
     if (code === 'SPACE') return;
     if (typeof code === 'string' && [...code].length === 1) {

@@ -13,9 +13,9 @@
 //   Row 2: 10 letters
 //   Row 3: 9 letters
 //   Row 4: punctuation strip (! : . / ( ))
-//   Row 5: ABC/123 + רווח (wide) + ↑ ← ↓ →
-// The arrows live on the bottom action row alongside mode-toggle and
-// space; punctuation sits directly above them.
+//   Row 5: 🌐 globe + רווח (wide) + ↑ ← ↓ →
+// The arrows live on the bottom action row alongside the keyboard-cycle
+// globe and space; punctuation sits directly above them.
 
 import { makeKey, modeKey } from './keypad.js';
 
@@ -74,19 +74,13 @@ export function renderHebrewKeypad({ onKey }) {
   }, onKey));
   lettersBlock.appendChild(punctRow);
 
-  // Bottom action row: math toggle, English toggle, wide Space, then arrows.
-  // Mirrors the English keypad's bottom row so both alphabet keypads expose
-  // a one-tap hop to the other alphabet AND back to math, matching iPadOS
-  // where the language globe sits next to the 123 key.
+  // Bottom action row: globe (cycles keyboards), wide Space, then arrows.
+  // The single globe steps through math → hebrew → english → math, matching
+  // the iPadOS language globe — so there's one switch key, not a separate
+  // key per alphabet.
   const actionRow = document.createElement('div');
   actionRow.className = 'keypad__row keypad__row--bottom';
-  actionRow.appendChild(makeKey(modeKey('מקלדת מתמטית'), onKey));
-  actionRow.appendChild(makeKey({
-    code: 'TOGGLE_ENGLISH',
-    label: 'ABC',
-    kind: 'mode',
-    title: 'מקלדת אנגלית'
-  }, onKey));
+  actionRow.appendChild(makeKey(modeKey('החלפת מקלדת'), onKey));
   actionRow.appendChild(makeKey({ code: 'SPACE', label: 'רווח', kind: 'space' }, onKey));
   actionRow.appendChild(makeKey({ code: 'UP', label: '↑', kind: 'nav' }, onKey));
   actionRow.appendChild(makeKey({ code: 'LEFT', label: '←', kind: 'nav' }, onKey));

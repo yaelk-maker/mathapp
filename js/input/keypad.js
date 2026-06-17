@@ -72,9 +72,9 @@ const KEYS = [
   { code: '%', label: '%', kind: 'op' },
   { code: 'ABS', label: '|a|', kind: 'comp', title: 'ערך מוחלט' },
   { code: 'SPACE', label: 'Space', kind: 'space', span: 4 },
-  // Mode toggle inherits modeKey's stacked ABC/123 glyph; span 2 so it
-  // matches ⌫'s footprint directly above it.
-  Object.assign({}, modeKey('מקלדת עברית'), { span: 2 })
+  // Mode toggle inherits modeKey's globe glyph; span 2 so it matches ⌫'s
+  // footprint directly above it. One globe cycles math → hebrew → english.
+  Object.assign({}, modeKey('החלפת מקלדת'), { span: 2 })
 ];
 
 export function renderKeypad({ onKey }) {
@@ -91,15 +91,25 @@ export function renderKeypad({ onKey }) {
   return wrapper;
 }
 
-// Stacked "ABC / 123" mode-switch button — matches the iPadOS look so the
-// kid recognises it as a keyboard-mode toggle rather than a character key.
+// Globe mode-switch button — matches the iPadOS language/keyboard globe so
+// the kid recognises it as a keyboard-mode toggle rather than a character
+// key. Inline SVG draws on currentColor so the per-mode tints (Hebrew /
+// English) still recolour it.
+const GLOBE_SVG =
+    '<svg class="keypad__globe" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+  + '<circle cx="12" cy="12" r="9"/>'
+  + '<ellipse cx="12" cy="12" rx="4" ry="9"/>'
+  + '<line x1="3" y1="12" x2="21" y2="12"/>'
+  + '<line x1="4.6" y1="6.8" x2="19.4" y2="6.8"/>'
+  + '<line x1="4.6" y1="17.2" x2="19.4" y2="17.2"/>'
+  + '</svg>';
+
 export function modeKey(title) {
   return {
     code: 'TOGGLE_KEYPAD',
     kind: 'mode',
     title,
-    html: '<span class="keypad__mode-top">ABC</span>'
-        + '<span class="keypad__mode-bot">123</span>'
+    html: GLOBE_SVG
   };
 }
 

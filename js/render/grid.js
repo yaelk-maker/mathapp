@@ -307,6 +307,21 @@ export function updateCursor(grid, prevCursor, nextCursor, getCellAt) {
   }
 }
 
+// Map a stored atom to the glyph shown to the kid. The multiplication atom
+// is stored as '×' (so equation text/keypad stay unchanged) but rendered as
+// a centred dot '⋅' — the cross was being read as the variable x/X in
+// formulas like "2×x", which confused the kid. Storage stays '×' so nothing
+// downstream (export, parsing, the keypad icon) has to change.
+const DISPLAY_OVERRIDES = { '×': '⋅' };
+function displayChar(ch) {
+  return DISPLAY_OVERRIDES[ch] || ch;
+}
+// Same mapping applied across a multi-char slot string (fraction numerator,
+// exponent, radicand, …) which can hold a run like "(5×x)−2".
+function displayChars(str) {
+  return String(str).replace(/×/g, DISPLAY_OVERRIDES['×']);
+}
+
 // Render the contents of a single cell DOM node based on the value object.
 // Exported so worksheet.js can use the same composite-aware paint for
 // grid annotation cells — they share the cell shape ({ ch } atoms and
@@ -318,7 +333,7 @@ export function paintCell(cellEl, value, activeSlot) {
   if (!value) return;
 
   if (value.ch != null) {
-    cellEl.textContent = value.ch;
+    cellEl.textContent = displayChar(value.ch);
     return;
   }
 
@@ -336,7 +351,7 @@ function buildCompositeDOM(cell, activeSlot) {
     const el = document.createElement(tag);
     el.className = `composite__${klass}`;
     if (activeSlot === name) el.classList.add('composite__slot--active');
-    el.textContent = content || ' ';
+    el.textContent = content ? displayChars(content) : ' ';
     el.dataset.slot = name;
     return el;
   };

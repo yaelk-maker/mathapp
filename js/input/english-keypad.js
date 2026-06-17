@@ -6,7 +6,7 @@
 //   Row 2:  a s d f g h j k l
 //   Row 3: ⇧ z x c v b n m ⌫
 //   Row 4: ! : . / ( )            (punctuation strip)
-//   Row 5: 123 | אבג | space (wide) | ↑ ← ↓ →
+//   Row 5: 🌐 globe | space (wide) | ↑ ← ↓ →
 //
 // Each letter key emits its lowercase glyph by default. The shift key on
 // row 3 cycles through three states: off → shift (one capital) → caps lock
@@ -18,10 +18,7 @@
 //   - Letters: 'a'..'z' or 'A'..'Z' depending on shift state
 //   - Punctuation: '!', ':', '.', '/', '(', ')'
 //   - Actions: 'BACKSPACE', 'SPACE', 'LEFT', 'RIGHT', 'UP', 'DOWN',
-//              'TOGGLE_KEYPAD' (→ math), 'TOGGLE_HEBREW' (→ hebrew)
-//
-// The TOGGLE_HEBREW code is unique to the English keypad — it lets the kid
-// jump straight to the Hebrew layout without a detour through math.
+//              'TOGGLE_KEYPAD' (globe — cycles to the next keyboard)
 
 import { makeKey, modeKey } from './keypad.js';
 
@@ -124,16 +121,11 @@ export function renderEnglishKeypad({ onKey }) {
   }
   lettersBlock.appendChild(punctRow);
 
-  // Bottom action row: 123 (math), אבג (Hebrew), wide Space, ↑ ← ↓ →.
+  // Bottom action row: globe (cycles keyboards), wide Space, ↑ ← ↓ →.
+  // One globe steps through math → hebrew → english → math (iPadOS-style).
   const actionRow = document.createElement('div');
   actionRow.className = 'keypad__row keypad__row--bottom';
-  actionRow.appendChild(makeKey(modeKey('מקלדת מתמטית'), onKey));
-  actionRow.appendChild(makeKey({
-    code: 'TOGGLE_HEBREW',
-    label: 'אבג',
-    kind: 'mode',
-    title: 'מקלדת עברית'
-  }, onKey));
+  actionRow.appendChild(makeKey(modeKey('החלפת מקלדת'), onKey));
   actionRow.appendChild(makeKey({ code: 'SPACE', label: 'space', kind: 'space' }, onKey));
   actionRow.appendChild(makeKey({ code: 'UP', label: '↑', kind: 'nav' }, onKey));
   actionRow.appendChild(makeKey({ code: 'LEFT', label: '←', kind: 'nav' }, onKey));
