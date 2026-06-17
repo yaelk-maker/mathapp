@@ -1907,10 +1907,9 @@ h1 {
 }
 .keypad__key--edit:active { background: #fbd5d5; }
 
-/* Mode-switch key (123 ⇄ אבג) — distinguished so the kid spots it as the
-   keyboard-switch instead of confusing it with a regular character key.
-   Renders "ABC" stacked over "123" the way the iPadOS system keyboard does
-   so the kid recognises the glyph as a keyboard mode toggle. */
+/* Mode-switch key — distinguished so the kid spots it as the keyboard-switch
+   instead of confusing it with a regular character key. Renders the iPadOS
+   language globe so the kid recognises the glyph as a keyboard mode toggle. */
 .keypad__key--mode {
   background: #eef3ff;
   color: var(--accent);
@@ -1923,16 +1922,16 @@ h1 {
   padding: 4px 8px;
 }
 .keypad__key--mode:active { background: #cfdcfb; }
-.keypad__mode-top,
-.keypad__mode-bot {
-  display: block;
-  font-size: 0.875rem;
-  letter-spacing: 0.04em;
-}
-.keypad__mode-top {
-  border-bottom: 1.5px solid currentColor;
-  padding-bottom: 1px;
-  margin-bottom: 2px;
+/* Globe glyph — strokes follow currentColor so the per-mode tints recolour
+   it. Sized to sit comfortably inside the key like the iPadOS globe. */
+.keypad__globe {
+  width: 1.5rem;
+  height: 1.5rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
 }
 
 /* Space key — wide, neutral. */

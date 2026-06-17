@@ -20,18 +20,18 @@ export const COMPOSITE = Object.freeze({
   ABS: 'abs'
 });
 
-// 25 cols × 4 rows. Cols: 25 leaves 23 writable columns (after the
+// 25 cols × 6 rows. Cols: 25 leaves 23 writable columns (after the
 // MARGIN_COLS margin), enough for the README's headline distribution
-// line — 6x−3(2x−3)>(x+4)−4(x−1), 23 atoms. Rows: 4 is the per-exercise
+// line — 6x−3(2x−3)>(x+4)−4(x−1), 23 atoms. Rows: 6 is the per-exercise
 // default — each exercise now lives in its own block (see Exercise
-// labels below), and 4 rows is enough to lay out a typical solving
-// step without leaving a huge blank tail under the work. The kid can
+// labels below), and 6 rows gives the kid room to lay out a multi-step
+// solution without immediately reaching for the ➕↕ button. The kid can
 // still add rows via the toolbar's ➕↕ button or the corner ⤡ handle.
 // Notebooks created before this change still load at their stored
 // size; migrateWorkBlockSize only shrinks (never grows), and only when
-// the existing content already fits — so a kid with content past row 4
+// the existing content already fits — so a kid with content past row 6
 // keeps their tall block.
-export const DEFAULT_GRID = Object.freeze({ rows: 4, cols: 25 });
+export const DEFAULT_GRID = Object.freeze({ rows: 6, cols: 25 });
 
 // Reserved "notebook margin" on the left of every work block. The first
 // MARGIN_COLS columns render with the same grid lines as the rest of the
