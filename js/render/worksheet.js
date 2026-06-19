@@ -14,9 +14,11 @@ import {
   clampAnnotationFont,
   ANNOTATION_FONT_STEP_CQH,
   DEFAULT_ANNOTATION_FONT_CQH,
-  isGridAnnotation
+  isGridAnnotation,
+  isGraphAnnotation
 } from '../page-model.js';
 import { paintCell } from './grid.js';
+import { buildGraphPlane } from './graph.js';
 
 const urlCache = new Map(); // blobId -> objectURL
 
@@ -139,6 +141,9 @@ function buildAnnotationEl(annot, block, options) {
   // are independent of the contenteditable text-annotation path below.
   if (isGridAnnotation(annot)) {
     return buildGridAnnotationEl(annot, block, options);
+  }
+  if (isGraphAnnotation(annot)) {
+    return buildGraphAnnotationEl(annot, block, options);
   }
   const el = document.createElement('div');
   el.className = 'worksheet__annot';
@@ -419,11 +424,106 @@ function buildGridAnnotationEl(annot, block, options) {
   menuBtn.title = 'גרור כדי להזיז · הקש כדי לפתוח אפשרויות';
   menuBtn.setAttribute('aria-label', 'גרור כדי להזיז, הקש כדי לפתוח אפשרויות');
   menuBtn.addEventListener('mousedown', (e) => e.preventDefault());
-  bindGridAnnotHandle(menuBtn, el, annot, block, options);
+  bindAnnotHandle(menuBtn, el, annot, block, options, enterGridManipulateMode);
   el.appendChild(menuBtn);
 
   bindGridAnnotationInteractions(el, annot, block, options);
   return el;
+}
+
+// --- Graph annotation rendering -------------------------------------------
+//
+// A coordinate-plane floating on the worksheet. The interactive plane itself
+// (axes, tap-to-plot points, lines, y=mx+b) is the shared buildGraphPlane from
+// graph.js; here we only add the worksheet annotation envelope: position/size,
+// a "⋮⋮" handle for drag-or-tap, and a manipulate mode (resize + delete). The
+// worksheet image underneath is never touched — the graph's data lives in the
+// annotation record.
+function buildGraphAnnotationEl(annot, block, options) {
+  const el = document.createElement('div');
+  el.className = 'worksheet__annot worksheet__annot--graph';
+  el.dataset.annotId = annot.id;
+  el.dataset.annotType = 'graph';
+  el.setAttribute('dir', 'ltr');
+  el.style.left = `${(annot.x * 100).toFixed(3)}%`;
+  el.style.top = `${(annot.y * 100).toFixed(3)}%`;
+  el.style.width = `${(annot.w * 100).toFixed(3)}%`;
+
+  const plane = buildGraphPlane(annot, {
+    // Reuse the annotation undo/save callbacks: manipulate-start pushes undo,
+    // changed queues a save — same contract the text/grid annotations use.
+    onEditStart: () => {
+      if (options.onAnnotationManipulateStart) options.onAnnotationManipulateStart(block.id, annot.id);
+    },
+    onChange: () => {
+      if (options.onAnnotationChanged) options.onAnnotationChanged(block.id);
+    }
+  });
+  el.appendChild(plane);
+
+  const menuBtn = document.createElement('button');
+  menuBtn.type = 'button';
+  menuBtn.className = 'gridannot__menu';
+  menuBtn.textContent = '⋮⋮';
+  menuBtn.title = 'גרור כדי להזיז · הקש כדי לפתוח אפשרויות';
+  menuBtn.setAttribute('aria-label', 'גרור כדי להזיז, הקש כדי לפתוח אפשרויות');
+  menuBtn.addEventListener('mousedown', (e) => e.preventDefault());
+  bindAnnotHandle(menuBtn, el, annot, block, options, enterGraphManipulateMode);
+  el.appendChild(menuBtn);
+
+  return el;
+}
+
+// Manipulate mode for a graph annotation: a resize handle plus a minimal
+// delete/done chrome. Dragging is handled by the "⋮⋮" handle (not the body,
+// which is the plotting surface), so we don't bind body-drag here.
+function enterGraphManipulateMode(el, annot, block, options) {
+  if (el.classList.contains('worksheet__annot--manipulate')) return;
+  el.classList.add('worksheet__annot--manipulate');
+  if (options.onAnnotationManipulateStart) {
+    options.onAnnotationManipulateStart(block.id, annot.id);
+  }
+
+  const overlay = el.closest('.worksheet__overlay');
+  const chrome = document.createElement('div');
+  chrome.className = 'worksheet__annot-chrome';
+  const mkBtn = (label, title, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'worksheet__annot-btn';
+    b.textContent = label;
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+    return b;
+  };
+  chrome.appendChild(mkBtn('🗑', 'מחיקה', () => {
+    if (options.onDeleteAnnotation) options.onDeleteAnnotation(block.id, annot.id);
+  }));
+  chrome.appendChild(mkBtn('✓', 'סיום', () => exitManipulateMode()));
+  el.appendChild(chrome);
+
+  const rect = el.getBoundingClientRect();
+  if (rect.top < 60) chrome.classList.add('worksheet__annot-chrome--flip-below');
+
+  const handle = document.createElement('div');
+  handle.className = 'worksheet__annot-resize';
+  handle.setAttribute('aria-hidden', 'true');
+  el.appendChild(handle);
+  bindResize(handle, el, annot, block, overlay, options);
+
+  function exitManipulateMode() {
+    el.classList.remove('worksheet__annot--manipulate');
+    chrome.remove();
+    handle.remove();
+    document.removeEventListener('pointerdown', onOutside, true);
+  }
+  const onOutside = (e) => {
+    if (el.contains(e.target)) return;
+    exitManipulateMode();
+  };
+  setTimeout(() => document.addEventListener('pointerdown', onOutside, true), 0);
 }
 
 // Drag-or-tap binding on the corner "⋮⋮" handle.
@@ -434,7 +534,9 @@ function buildGridAnnotationEl(annot, block, options) {
 //   - pointerup after a drag → persist and fire onAnnotationChanged.
 // We don't enter manipulate mode for drags — the kid is just
 // repositioning, no reason to also flip them into resize mode.
-function bindGridAnnotHandle(handleEl, el, annot, block, options) {
+// `openManipulate(el, annot, block, options)` is invoked on a tap (no drift),
+// letting grid and graph annotations open their own manipulate chrome.
+function bindAnnotHandle(handleEl, el, annot, block, options, openManipulate) {
   let pointerId = null;
   let startClientX = 0, startClientY = 0;
   let startAnnotX = 0, startAnnotY = 0;
@@ -497,7 +599,7 @@ function bindGridAnnotHandle(handleEl, el, annot, block, options) {
       moved = false;
       return;
     }
-    enterGridManipulateMode(el, annot, block, options);
+    openManipulate(el, annot, block, options);
   });
 }
 
@@ -848,6 +950,7 @@ function bindCreateOnTap(overlay, block, options) {
     if (!ws) return null;
     if (ws.classList.contains('worksheet--annotate-grid')) return 'grid';
     if (ws.classList.contains('worksheet--annotate-text')) return 'text';
+    if (ws.classList.contains('worksheet--annotate-graph')) return 'graph';
     return null;
   };
 

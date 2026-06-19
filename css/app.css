@@ -670,7 +670,8 @@ h1 {
   min-width: 0;
   max-width: 100%;
 }
-.editor--split #page > .workblock {
+.editor--split #page > .workblock,
+.editor--split #page > .graphblock {
   grid-column: 2;
   /* auto-placed grid-row — each workblock takes the next row */
   justify-self: stretch;
@@ -2211,6 +2212,254 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.4);
 }
 .crop-overlay .btn--ghost:active { background: rgba(255, 255, 255, 0.2); }
+
+/* --- Coordinate-plane graph block --- */
+/* A GRAPH block renders an inline-SVG Cartesian plane the kid taps to plot
+   points on. Lives in the page flow like a workblock; the padding-top strip
+   clears the drag handle, exactly like .workblock. */
+.graphblock {
+  display: block;
+  max-width: 100%;
+  padding-top: 22px;
+}
+.graphblock__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  justify-content: flex-start;
+  padding: 6px 12px 6px 60px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-weight: 600;
+  color: #333;
+  position: relative;
+  z-index: 2;
+}
+.graphblock__title { color: #555; }
+.graphblock__readout {
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.graphblock__readout--hint {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.graphblock__clear {
+  margin-inline-start: auto;
+  min-height: 36px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  color: #555;
+  font-size: 0.9rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.graphblock__clear:active { background: #f0f0f0; }
+/* Reuse the workblock delete button's look: dark circle, top-start corner. */
+.graphblock__delete {
+  position: absolute;
+  top: 4px;
+  right: -6px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: white;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 5;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.graphblock__delete:active { background: rgba(192, 57, 43, 0.85); }
+.graphblock__plot {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+}
+.graphblock__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Drags must not scroll the page out from under the kid's finger. */
+  touch-action: none;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+.graphblock__del-point {
+  position: absolute;
+  transform: translate(-50%, -150%);
+  min-height: 36px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: none;
+  background: var(--danger);
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  z-index: 6;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The interactive plane wrapper (shared by the GRAPH block and the
+   on-worksheet graph annotation). */
+.graphplane {
+  display: block;
+}
+/* Bar above the plot: tool toggles + read-out + clear. */
+.graphplane__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 6px 12px;
+}
+/* Tool row: point / line / segment / function toggles. */
+.graphblock__tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.graphblock__tool {
+  min-height: 36px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  color: #444;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.graphblock__tool:active { background: #f0f0f0; }
+.graphblock__tool--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+/* y=mx+b panel. */
+.graphblock__fn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* [hidden] alone is display:none in the UA sheet, but this author
+     display:flex outranks it — restore hiding explicitly. */
+}
+.graphblock__fn[hidden] { display: none; }
+.graphblock__fn:not([hidden]) {
+  display: flex;
+  gap: 10px;
+  margin: 0 12px 8px 12px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.graphblock__fn-preview {
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  min-width: 5.5em;
+}
+.graphblock__fn-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.graphblock__fn-cap {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.graphblock__fn-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--accent);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.graphblock__fn-btn:active { background: #eaf1ff; }
+.graphblock__fn-val {
+  min-width: 2.4em;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.graphblock__fn-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+.graphblock__fn-add {
+  min-height: 40px;
+  padding: 4px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.graphblock__fn-add:active { background: var(--accent-pressed); }
+.graphblock__fn-cancel {
+  min-height: 40px;
+  padding: 4px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  color: #555;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* --- On-worksheet graph annotation --- */
+/* The same interactive plane as a GRAPH block, floating on the worksheet
+   image. A translucent card keeps the tool row readable over the photo; the
+   "⋮⋮" handle moves it (drag) or opens manipulate mode (tap). */
+.worksheet__annot--graph {
+  position: absolute;
+  /* min width so the plane stays usable even if dragged small */
+  min-width: 140px;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 10px;
+  padding: 6px 2px 2px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.18);
+  box-sizing: border-box;
+}
+/* The plot fills the annotation width (the block's 460px cap doesn't apply
+   here — the annotation's own width controls the size). */
+.worksheet__annot--graph .graphblock__plot {
+  max-width: none;
+}
+.worksheet__annot--graph.worksheet__annot--manipulate {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* --- Block drag-to-reorder --- */
 /* Every block (worksheet, workblock, textblock) gets a small handle in the

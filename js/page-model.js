@@ -5,7 +5,12 @@
 
 export const BLOCK = Object.freeze({
   WORK: 'work',
-  WORKSHEET: 'worksheet'
+  WORKSHEET: 'worksheet',
+  // Coordinate-plane graph: a vertical-flow block (like WORK / WORKSHEET) that
+  // renders a Cartesian grid the kid plots points on. Lives at page level so a
+  // graph can sit below an uploaded worksheet in the same section without the
+  // grid ever bleeding under the worksheet image.
+  GRAPH: 'graph'
 });
 
 // Composite cell types — Phase 5. Each composite occupies one logical grid
@@ -175,6 +180,71 @@ export function migrateWorkBlockRowLabels(block) {
   return false;
 }
 
+// Default visible window for a new graph block — a symmetric −10..10 plane
+// with integer gridlines, matching how 8th-grade textbooks draw a first
+// coordinate system. snapStep is the lattice taps snap to (integers), kept
+// separate from tickStep so a future "half-unit" mode can snap finer than the
+// labelled gridlines without a data migration.
+export const GRAPH_DEFAULT_VIEW = Object.freeze({ xMin: -10, xMax: 10, yMin: -10, yMax: 10 });
+
+let _graphPointCounter = 0;
+export function graphPointId() {
+  _graphPointCounter += 1;
+  return `gp_${Date.now().toString(36)}_${_graphPointCounter}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+export function newGraphBlock({
+  view = GRAPH_DEFAULT_VIEW,
+  tickStep = 1,
+  snapStep = 1
+} = {}) {
+  return {
+    type: BLOCK.GRAPH,
+    id: blockId(),
+    // Copied so the frozen default is never mutated when a view range is
+    // adjusted in a later phase.
+    view: { ...view },
+    tickStep,
+    snapStep,
+    // Plotted points: { id, x, y }. x/y are math coordinates (snapped to the
+    // lattice on placement). Drawn lines/functions are a later phase — the
+    // field is reserved now so old graph blocks need no migration when it lands.
+    points: [],
+    lines: []
+  };
+}
+
+export function isGraphBlock(block) {
+  return !!(block && block.type === BLOCK.GRAPH);
+}
+
+let _graphLineCounter = 0;
+export function graphLineId() {
+  _graphLineCounter += 1;
+  return `gl_${Date.now().toString(36)}_${_graphLineCounter}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// A line in a graph block. Three kinds:
+//   'line'    — a straight line through p1 & p2, extended across the whole
+//               plane with arrowheads (8th-grade "the line through (1,2),(3,8)").
+//   'segment' — just the segment between p1 & p2 (endpoint dots, no arrows).
+//   'mxb'     — the function y = m·x + b, also extended with arrowheads.
+// p1/p2 are math {x,y} (snapped on placement); m/b are numbers. color is
+// assigned by the renderer from a small palette; showEquation drives the
+// "y = …" label (on for 'line' & 'mxb', off for a bare 'segment').
+export function newGraphLine({ kind, p1 = null, p2 = null, m = 1, b = 0, color = null } = {}) {
+  return {
+    id: graphLineId(),
+    kind,
+    p1,
+    p2,
+    m,
+    b,
+    color,
+    showEquation: kind !== 'segment'
+  };
+}
+
 export function newWorksheetBlock({ blobId, naturalWidth, naturalHeight }) {
   return {
     type: BLOCK.WORKSHEET,
@@ -243,6 +313,35 @@ export function newGridAnnotation({
 
 export function isGridAnnotation(annot) {
   return !!(annot && annot.type === 'grid');
+}
+
+// Graph annotation: a coordinate-plane (same view/points/lines model as a
+// GRAPH block) floating on a worksheet image. Position/width are fractions of
+// the rendered overlay like every other annotation; height follows from the
+// square aspect of the plane. Default width is generous (~40% of the image)
+// so the axes are usable without an immediate resize.
+export function newGraphAnnotation({
+  x = 0.5,
+  y = 0.5,
+  w = 0.4,
+  view = GRAPH_DEFAULT_VIEW,
+  tickStep = 1,
+  snapStep = 1
+} = {}) {
+  return {
+    id: annotationId(),
+    type: 'graph',
+    x, y, w,
+    view: { ...view },
+    tickStep,
+    snapStep,
+    points: [],
+    lines: []
+  };
+}
+
+export function isGraphAnnotation(annot) {
+  return !!(annot && annot.type === 'graph');
 }
 
 export function getAnnotations(block) {
