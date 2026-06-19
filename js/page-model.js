@@ -5,7 +5,12 @@
 
 export const BLOCK = Object.freeze({
   WORK: 'work',
-  WORKSHEET: 'worksheet'
+  WORKSHEET: 'worksheet',
+  // Coordinate-plane graph: a vertical-flow block (like WORK / WORKSHEET) that
+  // renders a Cartesian grid the kid plots points on. Lives at page level so a
+  // graph can sit below an uploaded worksheet in the same section without the
+  // grid ever bleeding under the worksheet image.
+  GRAPH: 'graph'
 });
 
 // Composite cell types — Phase 5. Each composite occupies one logical grid
@@ -173,6 +178,44 @@ export function migrateWorkBlockRowLabels(block) {
     return true;
   }
   return false;
+}
+
+// Default visible window for a new graph block — a symmetric −10..10 plane
+// with integer gridlines, matching how 8th-grade textbooks draw a first
+// coordinate system. snapStep is the lattice taps snap to (integers), kept
+// separate from tickStep so a future "half-unit" mode can snap finer than the
+// labelled gridlines without a data migration.
+export const GRAPH_DEFAULT_VIEW = Object.freeze({ xMin: -10, xMax: 10, yMin: -10, yMax: 10 });
+
+let _graphPointCounter = 0;
+export function graphPointId() {
+  _graphPointCounter += 1;
+  return `gp_${Date.now().toString(36)}_${_graphPointCounter}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+export function newGraphBlock({
+  view = GRAPH_DEFAULT_VIEW,
+  tickStep = 1,
+  snapStep = 1
+} = {}) {
+  return {
+    type: BLOCK.GRAPH,
+    id: blockId(),
+    // Copied so the frozen default is never mutated when a view range is
+    // adjusted in a later phase.
+    view: { ...view },
+    tickStep,
+    snapStep,
+    // Plotted points: { id, x, y }. x/y are math coordinates (snapped to the
+    // lattice on placement). Drawn lines/functions are a later phase — the
+    // field is reserved now so old graph blocks need no migration when it lands.
+    points: [],
+    lines: []
+  };
+}
+
+export function isGraphBlock(block) {
+  return !!(block && block.type === BLOCK.GRAPH);
 }
 
 export function newWorksheetBlock({ blobId, naturalWidth, naturalHeight }) {

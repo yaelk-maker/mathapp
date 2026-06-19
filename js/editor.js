@@ -37,11 +37,13 @@ import {
   newAnnotation,
   newGridAnnotation,
   isGridAnnotation,
+  newGraphBlock,
   nextExerciseLabel,
   nextRowLabel,
   getAnnotations
 } from './page-model.js';
 import { renderWorkBlock, updateCell, updateCursor, paintCell } from './render/grid.js';
+import { renderGraphBlock } from './render/graph.js';
 import {
   renderWorksheetBlock,
   revokeWorksheetUrls,
@@ -300,6 +302,7 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="toggle-annotate-grid" aria-label="חישוב על דף" title="חישוב על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת חישוב">🔢 <span class="label">חישוב על דף</span></button>
           <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת טקסט">📝 <span class="label">טקסט על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
+          <button class="btn btn--ghost" id="add-graph" aria-label="גרף" title="הוספת מערכת צירים — לסימון נקודות (x, y)">📈 <span class="label">גרף</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
           <button class="btn btn--ghost" id="toggle-share" aria-label="שיתוף וייצוא" title="הדפסה, שמירה כ-PDF וגיבוי" aria-expanded="false">📤 <span class="label">שיתוף</span></button>
           <span class="share-tools" id="share-tools" hidden>
@@ -393,6 +396,7 @@ export async function mountEditor(root, notebookId) {
     addWorksheet({ capture: false })
   );
   document.getElementById('add-work').addEventListener('click', () => addWorkBlock());
+  document.getElementById('add-graph').addEventListener('click', () => addGraphBlock());
 
   // "Add a box on the page" buttons — one for a calculation grid
   // (חישוב על דף), one for free text (טקסט על דף). Both share ONE
@@ -1003,6 +1007,15 @@ export async function mountEditor(root, notebookId) {
         if (isActive) {
           activeGrid = grid;
         }
+      } else if (block.type === BLOCK.GRAPH) {
+        el = renderGraphBlock(block, {
+          // Snapshot before the first mutation of a gesture so ↺ can undo a
+          // placed / dragged / deleted point, mirroring how grid annotations
+          // push undo on manipulate-start.
+          onEditStart: () => pushUndo(),
+          onChange: () => queueSave(),
+          onDelete: (id) => removeBlock(id)
+        });
       }
       // Any other block type (e.g. legacy 'text' from the short-lived
       // textbox feature) renders nothing — text is now typed directly on
@@ -1629,9 +1642,10 @@ export async function mountEditor(root, notebookId) {
     const block = page.blocks.find((b) => b.id === blockId);
     if (!block) return;
     const isWork = block.type === BLOCK.WORK;
+    const isGraph = block.type === BLOCK.GRAPH;
     const ok = await confirmDialog({
-      title: isWork ? 'הסרת אזור פתרון' : 'הסרת דף',
-      body: isWork ? 'להסיר את אזור הפתרון הזה?' : 'להסיר את הדף הזה?',
+      title: isWork ? 'הסרת אזור פתרון' : isGraph ? 'הסרת גרף' : 'הסרת דף',
+      body: isWork ? 'להסיר את אזור הפתרון הזה?' : isGraph ? 'להסיר את הגרף הזה?' : 'להסיר את הדף הזה?',
       confirmLabel: 'הסרה',
       cancelLabel: 'ביטול',
       destructive: true
@@ -1749,6 +1763,29 @@ export async function mountEditor(root, notebookId) {
     cursor.r = 0;
     cursor.c = MARGIN_COLS;
     cursor.slot = null;
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Add a coordinate-plane graph block. Like addWorkBlock, it lands right
+  // after the active section's last block so a graph drops in below the
+  // worksheet (or the work area) the kid is currently looking at. The
+  // worksheet image is a separate stored block and is never touched.
+  async function addGraphBlock() {
+    pushUndo();
+    const newBlock = newGraphBlock();
+    const sections = computeSections();
+    const activeSection = sections[activeSectionIndex];
+    if (activeSection && activeSection.length > 0) {
+      const lastInSection = activeSection[activeSection.length - 1];
+      const insertAt = page.blocks.indexOf(lastInSection) + 1;
+      page.blocks.splice(insertAt, 0, newBlock);
+    } else {
+      page.blocks.push(newBlock);
+    }
+    // A graph isn't a typing target; drop grid-annot focus so the keypad
+    // doesn't keep routing into a worksheet overlay behind the new graph.
+    activeGridAnnot = null;
     await savePage(page);
     await renderBlocks();
   }
