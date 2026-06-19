@@ -302,7 +302,7 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת קובץ" title="צילום, תמונה או PDF">📷 <span class="label">דף</span></button>
           <button class="btn btn--ghost" id="toggle-annotate-grid" aria-label="חישוב על דף" title="חישוב על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת חישוב">🔢 <span class="label">חישוב על דף</span></button>
           <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת טקסט">📝 <span class="label">טקסט על דף</span></button>
-          <button class="btn btn--ghost" id="toggle-annotate-graph" aria-label="גרף על דף" title="גרף על דף — הקישי כאן ואז על הדף כדי להוסיף מערכת צירים">📈 <span class="label">גרף על דף</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-graph" aria-label="גרף על דף" title="גרף על דף — הקישי כאן ואז על דף שהעלית כדי להוסיף מערכת צירים">📐 <span class="label">גרף על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
           <button class="btn btn--ghost" id="add-graph" aria-label="גרף" title="הוספת מערכת צירים — לסימון נקודות (x, y)">📈 <span class="label">גרף</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
@@ -451,6 +451,17 @@ export async function mountEditor(root, notebookId) {
     setAnnotateKind(annotateKind === 'text' ? null : 'text');
   });
   annotateGraphBtn.addEventListener('click', () => {
+    // Graph-on-worksheet only makes sense once a worksheet image exists to
+    // place it on. Without one, arming would dead-end (the tap target is the
+    // worksheet overlay, which isn't on the page) — so guide the kid to upload
+    // a sheet first, or point them at the standalone 📈 graph block instead.
+    if (annotateKind !== 'graph') {
+      const hasWorksheet = page.blocks.some((b) => b.type === BLOCK.WORKSHEET);
+      if (!hasWorksheet) {
+        toast('כדי להוסיף גרף על דף צריך קודם להעלות דף (📷 דף). להוספת גרף עצמאי השתמשי בכפתור 📈 גרף.', { kind: 'warn', duration: 4000 });
+        return;
+      }
+    }
     setAnnotateKind(annotateKind === 'graph' ? null : 'graph');
   });
 
@@ -1806,6 +1817,12 @@ export async function mountEditor(root, notebookId) {
     activeGridAnnot = null;
     await savePage(page);
     await renderBlocks();
+    // The graph lands at the end of the active section — often below the fold
+    // on a page that already has several exercises — so scroll it into view.
+    // Without this the kid taps 📈 and, seeing nothing change on-screen,
+    // concludes the button is broken.
+    const el = pageHost.querySelector(`[data-block-id="${newBlock.id}"]`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   // Insert a blank row above the cursor's current row in the active work
