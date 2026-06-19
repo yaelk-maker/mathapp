@@ -315,6 +315,35 @@ export function isGridAnnotation(annot) {
   return !!(annot && annot.type === 'grid');
 }
 
+// Graph annotation: a coordinate-plane (same view/points/lines model as a
+// GRAPH block) floating on a worksheet image. Position/width are fractions of
+// the rendered overlay like every other annotation; height follows from the
+// square aspect of the plane. Default width is generous (~40% of the image)
+// so the axes are usable without an immediate resize.
+export function newGraphAnnotation({
+  x = 0.5,
+  y = 0.5,
+  w = 0.4,
+  view = GRAPH_DEFAULT_VIEW,
+  tickStep = 1,
+  snapStep = 1
+} = {}) {
+  return {
+    id: annotationId(),
+    type: 'graph',
+    x, y, w,
+    view: { ...view },
+    tickStep,
+    snapStep,
+    points: [],
+    lines: []
+  };
+}
+
+export function isGraphAnnotation(annot) {
+  return !!(annot && annot.type === 'graph');
+}
+
 export function getAnnotations(block) {
   if (!block || !Array.isArray(block.annotations)) return [];
   return block.annotations;

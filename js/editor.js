@@ -38,6 +38,7 @@ import {
   newGridAnnotation,
   isGridAnnotation,
   newGraphBlock,
+  newGraphAnnotation,
   nextExerciseLabel,
   nextRowLabel,
   getAnnotations
@@ -301,6 +302,7 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת קובץ" title="צילום, תמונה או PDF">📷 <span class="label">דף</span></button>
           <button class="btn btn--ghost" id="toggle-annotate-grid" aria-label="חישוב על דף" title="חישוב על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת חישוב">🔢 <span class="label">חישוב על דף</span></button>
           <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת טקסט">📝 <span class="label">טקסט על דף</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-graph" aria-label="גרף על דף" title="גרף על דף — הקישי כאן ואז על הדף כדי להוסיף מערכת צירים">📈 <span class="label">גרף על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
           <button class="btn btn--ghost" id="add-graph" aria-label="גרף" title="הוספת מערכת צירים — לסימון נקודות (x, y)">📈 <span class="label">גרף</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
@@ -409,10 +411,12 @@ export async function mountEditor(root, notebookId) {
   // would swallow the placement tap).
   const annotateGridBtn = document.getElementById('toggle-annotate-grid');
   const annotateTextBtn = document.getElementById('toggle-annotate-text');
+  const annotateGraphBtn = document.getElementById('toggle-annotate-graph');
   function setAnnotateKind(kind) {
     annotateKind = kind;
     annotateGridBtn.classList.toggle('btn--active', kind === 'grid');
     annotateTextBtn.classList.toggle('btn--active', kind === 'text');
+    annotateGraphBtn.classList.toggle('btn--active', kind === 'graph');
     if (kind && pencilEnabled) {
       // Drop pen mode silently — the kid asked for typing, the explicit
       // toggle is more recent intent than the still-active pen state.
@@ -422,7 +426,9 @@ export async function mountEditor(root, notebookId) {
       toast(
         kind === 'grid'
           ? 'הקישי על הדף במקום שבו תרצי את תיבת החישוב'
-          : 'הקישי על הדף במקום שבו תרצי את תיבת הטקסט',
+          : kind === 'graph'
+            ? 'הקישי על הדף במקום שבו תרצי את מערכת הצירים'
+            : 'הקישי על הדף במקום שבו תרצי את תיבת הטקסט',
         { kind: 'info' }
       );
     }
@@ -436,12 +442,16 @@ export async function mountEditor(root, notebookId) {
     annotateKind = null;
     annotateGridBtn.classList.remove('btn--active');
     annotateTextBtn.classList.remove('btn--active');
+    annotateGraphBtn.classList.remove('btn--active');
   }
   annotateGridBtn.addEventListener('click', () => {
     setAnnotateKind(annotateKind === 'grid' ? null : 'grid');
   });
   annotateTextBtn.addEventListener('click', () => {
     setAnnotateKind(annotateKind === 'text' ? null : 'text');
+  });
+  annotateGraphBtn.addEventListener('click', () => {
+    setAnnotateKind(annotateKind === 'graph' ? null : 'graph');
   });
 
   // Section pager (centered above the page in split mode). Each arrow
@@ -1484,6 +1494,11 @@ export async function mountEditor(root, notebookId) {
       // (~30% of image width) so the kid sees a useful 3×8 cell layout
       // without immediately having to resize.
       annot = newGridAnnotation({ x: xFrac, y: yFrac, w: 0.30 });
+    } else if (kind === 'graph') {
+      // A coordinate plane needs more room than a calculation grid; ~40%
+      // of the image width gives a usable −10..10 plane out of the box.
+      annot = newGraphAnnotation({ x: xFrac, y: yFrac, w: 0.40 });
+      activeGridAnnot = null;
     } else {
       // Default width is generous (~22% of image width). The annotation
       // shrinks naturally as text fills it — there's no max width — but
@@ -1502,6 +1517,9 @@ export async function mountEditor(root, notebookId) {
       // start typing without an extra tap. focusGridAnnotCell handles
       // the re-render + cursor placement.
       focusGridAnnotCell(blockId, annot.id, 0, 0);
+    } else if (kind === 'graph') {
+      // A graph isn't a typing target — just render it in place.
+      await renderBlocks();
     } else {
       await renderBlocks();
       // Focus the freshly-placed annotation so the kid can immediately

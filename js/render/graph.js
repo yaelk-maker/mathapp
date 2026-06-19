@@ -1,15 +1,18 @@
-// Renders a GRAPH block as an inline-SVG coordinate plane.
+// Renders a coordinate-plane graph as inline SVG.
 //
-// Math convention: +x to the right, +y up. The figure is dir="ltr" even on an
-// RTL page (exactly like the workblock grid) because a coordinate system reads
-// left-to-right in a Hebrew classroom too; only descriptive text would be RTL.
+// Two consumers share the same interactive plane (`buildGraphPlane`):
+//   - a standalone GRAPH block (`renderGraphBlock`), and
+//   - a graph annotation floating on a worksheet image (worksheet.js calls
+//     buildGraphPlane and wraps it in the annotation drag/resize chrome).
+// The "model" passed to buildGraphPlane is any object carrying
+// view/tickStep/snapStep/points/lines + an id (a GRAPH block or a graph
+// annotation both qualify).
 //
-// SVG (not Canvas) is deliberate: axes/ticks stay crisp at any display size
-// with no devicePixelRatio bookkeeping, taps hit-test in math space with a
-// single getScreenCTM() inverse, and PDF print stays vector-sharp. The
-// page-spanning pencil canvas sits ABOVE every block, so when pen mode is on
-// the canvas captures pointers and the graph is automatically inert — no
-// extra mutex needed here.
+// Math convention: +x to the right, +y up. The plane is dir="ltr" even on an
+// RTL page (like the workblock grid). SVG (not Canvas) keeps axes crisp at any
+// size, hit-tests taps in math space via one getScreenCTM() inverse, and prints
+// vector-sharp. The page-spanning pencil canvas sits ABOVE every block, so when
+// pen mode is on the canvas captures pointers and the plane is inert.
 
 import { graphPointId, newGraphLine } from '../page-model.js';
 
@@ -174,53 +177,34 @@ function lineEndpoints(view, ln) {
   return [ln.p1, ln.p2];
 }
 
-export function renderGraphBlock(block, options = {}) {
+// Builds the interactive coordinate plane (tools + read-out + y=mx+b panel +
+// SVG plot) for `model` and returns the wrapper element. Shared by the GRAPH
+// block and the worksheet graph annotation.
+export function buildGraphPlane(model, options = {}) {
   const {
-    onEditStart = () => {},   // pushUndo — called once per gesture before the first mutation
-    onChange = () => {},      // queueSave — called after data actually changes
-    onDelete = () => {}       // removeBlock(id)
+    onEditStart = () => {},   // pushUndo — once per gesture before the first mutation
+    onChange = () => {}       // queueSave — after data actually changes
   } = options;
 
-  const view = block.view;
-  const snapStep = block.snapStep > 0 ? block.snapStep : 1;
-  const tickStep = block.tickStep > 0 ? block.tickStep : 1;
-  if (!Array.isArray(block.points)) block.points = [];
-  if (!Array.isArray(block.lines)) block.lines = [];
+  const view = model.view;
+  const snapStep = model.snapStep > 0 ? model.snapStep : 1;
+  const tickStep = model.tickStep > 0 ? model.tickStep : 1;
+  if (!Array.isArray(model.points)) model.points = [];
+  if (!Array.isArray(model.lines)) model.lines = [];
 
   const vbW = (view.xMax - view.xMin) * UNIT + PAD * 2;
   const vbH = (view.yMax - view.yMin) * UNIT + PAD * 2;
 
-  const figure = document.createElement('figure');
-  figure.className = 'graphblock';
-  figure.setAttribute('dir', 'ltr');
-  figure.dataset.blockId = block.id;
+  const plane = document.createElement('div');
+  plane.className = 'graphplane';
 
-  // ---- header: title + live read-out + clear ----
-  const header = document.createElement('header');
-  header.className = 'graphblock__header';
-  header.setAttribute('dir', 'rtl');
+  // ---- bar: tool toggles + live read-out + clear ----
+  const bar = document.createElement('div');
+  bar.className = 'graphplane__bar';
+  bar.setAttribute('dir', 'rtl');
 
-  const title = document.createElement('span');
-  title.className = 'graphblock__title';
-  title.textContent = 'גרף';
-
-  const readout = document.createElement('span');
-  readout.className = 'graphblock__readout';
-  readout.setAttribute('dir', 'ltr');
-
-  const clearBtn = document.createElement('button');
-  clearBtn.type = 'button';
-  clearBtn.className = 'graphblock__clear';
-  clearBtn.textContent = 'נקה';
-  clearBtn.title = 'מחיקת הכול';
-  clearBtn.setAttribute('aria-label', 'מחיקת כל הנקודות והקווים');
-
-  header.append(title, readout, clearBtn);
-
-  // ---- tool row: mode toggles + function panel opener ----
   const tools = document.createElement('div');
   tools.className = 'graphblock__tools';
-  tools.setAttribute('dir', 'rtl');
   const mkTool = (label, value, titleText) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -236,17 +220,26 @@ export function renderGraphBlock(block, options = {}) {
   const tFn = mkTool('y=mx+b', 'fn', 'הוספת פונקציה לפי שיפוע וחיתוך');
   tools.append(tPoint, tLine, tSeg, tFn);
 
-  // ---- block delete (top-start circle), styled like the workblock's ----
-  const del = document.createElement('button');
-  del.type = 'button';
-  del.className = 'graphblock__delete';
-  del.textContent = '✕';
-  del.title = 'הסרת הגרף';
-  del.setAttribute('aria-label', 'הסרת הגרף');
-  del.addEventListener('pointerdown', (e) => e.stopPropagation());
-  del.addEventListener('click', () => onDelete(block.id));
+  const readout = document.createElement('span');
+  readout.className = 'graphblock__readout';
+  readout.setAttribute('dir', 'ltr');
 
-  // ---- plot area (svg + overlaid delete-selected button) ----
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'graphblock__clear';
+  clearBtn.textContent = 'נקה';
+  clearBtn.title = 'מחיקת הכול';
+  clearBtn.setAttribute('aria-label', 'מחיקת כל הנקודות והקווים');
+
+  bar.append(tools, readout, clearBtn);
+
+  // ---- y=mx+b panel ----
+  const fnPanel = document.createElement('div');
+  fnPanel.className = 'graphblock__fn';
+  fnPanel.setAttribute('dir', 'ltr');
+  fnPanel.hidden = true;
+
+  // ---- plot ----
   const plot = document.createElement('div');
   plot.className = 'graphblock__plot';
   plot.style.aspectRatio = `${vbW} / ${vbH}`;
@@ -258,9 +251,9 @@ export function renderGraphBlock(block, options = {}) {
     'aria-label': 'מערכת צירים'
   });
 
-  // Arrowhead marker — unique id per block so multiple graphs on one page
-  // don't collide. auto-start-reverse lets one marker arm both ends.
-  const markerId = `graph-arrow-${block.id}`;
+  // Arrowhead marker — unique id per model so multiple planes on one page
+  // don't collide. auto-start-reverse arms both ends.
+  const markerId = `graph-arrow-${model.id}`;
   const defs = svgEl('defs');
   const marker = svgEl('marker', {
     id: markerId, viewBox: '0 0 10 10', refX: 8, refY: 5,
@@ -326,8 +319,7 @@ export function renderGraphBlock(block, options = {}) {
   gLabels.appendChild(mkText(yTop.px + 14, yTop.py + 4, 'y', 'middle'));
   svg.appendChild(gLabels);
 
-  // Dynamic layers (rebuilt on change): lines below points; equations above
-  // lines; ghost/preview on top.
+  // Dynamic layers: lines below points; equations above lines; ghost on top.
   const gLines = svgEl('g', { class: 'graphblock__lines' });
   const gPoints = svgEl('g', { class: 'graphblock__points' });
   const gEquations = svgEl('g', { class: 'graphblock__equations' });
@@ -340,14 +332,8 @@ export function renderGraphBlock(block, options = {}) {
   delSel.className = 'graphblock__del-point';
   delSel.hidden = true;
 
-  // y=mx+b panel.
-  const fnPanel = document.createElement('div');
-  fnPanel.className = 'graphblock__fn';
-  fnPanel.setAttribute('dir', 'ltr');
-  fnPanel.hidden = true;
-
   plot.append(svg, delSel);
-  figure.append(header, tools, fnPanel, del, plot);
+  plane.append(bar, fnPanel, plot);
 
   // ---------- state ----------
   let mode = 'point';            // 'point' | 'line' | 'segment'
@@ -357,16 +343,15 @@ export function renderGraphBlock(block, options = {}) {
   let fnDraft = { m: 1, b: 0 };
   let fnEditId = null;           // when editing an existing 'mxb' line
 
-  const findPoint = (id) => block.points.find((p) => p.id === id) || null;
-  const findLine = (id) => block.lines.find((l) => l.id === id) || null;
+  const findPoint = (id) => model.points.find((p) => p.id === id) || null;
+  const findLine = (id) => model.lines.find((l) => l.id === id) || null;
 
   // ---------- read-out ----------
   const refreshReadout = () => {
     let text = '';
     let hint = false;
     if (pending) {
-      text = 'הקישי על הנקודה השנייה';
-      hint = true;
+      text = 'הקישי על הנקודה השנייה'; hint = true;
     } else if (mode === 'line') {
       text = 'הקישי על שתי נקודות ליצירת קו'; hint = true;
     } else if (mode === 'segment') {
@@ -416,7 +401,7 @@ export function renderGraphBlock(block, options = {}) {
   // ---------- draw ----------
   const drawPoints = () => {
     gPoints.textContent = '';
-    for (const p of block.points) {
+    for (const p of model.points) {
       const px = mathToPx(view, p.x, p.y);
       const isSel = selection && selection.type === 'point' && selection.id === p.id;
       const c = svgEl('circle', {
@@ -432,7 +417,7 @@ export function renderGraphBlock(block, options = {}) {
   const drawLines = () => {
     gLines.textContent = '';
     gEquations.textContent = '';
-    block.lines.forEach((ln, i) => {
+    model.lines.forEach((ln, i) => {
       const color = ln.color || LINE_COLORS[i % LINE_COLORS.length];
       const sel = selection && selection.type === 'line' && selection.id === ln.id;
       const w = sel ? 4 : 2.5;
@@ -495,7 +480,6 @@ export function renderGraphBlock(block, options = {}) {
   // ---------- selection ----------
   const selectPoint = (id) => { selection = { type: 'point', id }; redraw(); };
   const selectLine = (id) => { selection = { type: 'line', id }; redraw(); };
-  const clearSelection = () => { selection = null; redraw(); };
 
   // ---------- mode / tools ----------
   const updateToolButtons = () => {
@@ -586,9 +570,9 @@ export function renderGraphBlock(block, options = {}) {
         const l = findLine(fnEditId);
         if (l) { l.m = fnDraft.m; l.b = fnDraft.b; }
       } else {
-        block.lines.push(newGraphLine({
+        model.lines.push(newGraphLine({
           kind: 'mxb', m: fnDraft.m, b: fnDraft.b,
-          color: LINE_COLORS[block.lines.length % LINE_COLORS.length]
+          color: LINE_COLORS[model.lines.length % LINE_COLORS.length]
         }));
       }
       closeFnPanel();
@@ -603,7 +587,6 @@ export function renderGraphBlock(block, options = {}) {
   };
 
   const openFnPanel = () => {
-    // Editing a selected function pre-fills from it; otherwise add a fresh one.
     if (selection && selection.type === 'line') {
       const l = findLine(selection.id);
       if (l && l.kind === 'mxb') { fnDraft = { m: l.m, b: l.b }; fnEditId = l.id; }
@@ -645,7 +628,7 @@ export function renderGraphBlock(block, options = {}) {
   const nearestPoint = (mx, my) => {
     let best = null;
     let bestD = HIT_RADIUS;
-    for (const p of block.points) {
+    for (const p of model.points) {
       const d = Math.hypot(p.x - mx, p.y - my);
       if (d <= bestD) { bestD = d; best = p; }
     }
@@ -656,7 +639,7 @@ export function renderGraphBlock(block, options = {}) {
     let best = null;
     let bestD = LINE_HIT;
     const P = { x: mx, y: my };
-    for (const ln of block.lines) {
+    for (const ln of model.lines) {
       let d;
       if (ln.kind === 'segment') d = distToSegment(P, ln.p1, ln.p2);
       else { const [e1, e2] = lineEndpoints(view, ln); d = distToLine(P, e1, e2); }
@@ -687,10 +670,10 @@ export function renderGraphBlock(block, options = {}) {
         // ignore a duplicate second tap on the same lattice point
       } else {
         onEditStart();
-        block.lines.push(newGraphLine({
+        model.lines.push(newGraphLine({
           kind: mode === 'line' ? 'line' : 'segment',
           p1: pending, p2: s,
-          color: LINE_COLORS[block.lines.length % LINE_COLORS.length]
+          color: LINE_COLORS[model.lines.length % LINE_COLORS.length]
         }));
         pending = null;
         redraw();
@@ -715,7 +698,7 @@ export function renderGraphBlock(block, options = {}) {
     // empty space → drop a new snapped point
     onEditStart();
     const np = { id: graphPointId(), ...snapM(m) };
-    block.points.push(np);
+    model.points.push(np);
     active = { id: np.id, undoPushed: true };
     selectPoint(np.id);
     onChange();
@@ -751,9 +734,9 @@ export function renderGraphBlock(block, options = {}) {
     if (!selection) return;
     onEditStart();
     if (selection.type === 'point') {
-      block.points = block.points.filter((p) => p.id !== selection.id);
+      model.points = model.points.filter((p) => p.id !== selection.id);
     } else {
-      block.lines = block.lines.filter((l) => l.id !== selection.id);
+      model.lines = model.lines.filter((l) => l.id !== selection.id);
     }
     selection = null;
     redraw();
@@ -762,10 +745,10 @@ export function renderGraphBlock(block, options = {}) {
 
   clearBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
   clearBtn.addEventListener('click', () => {
-    if (block.points.length === 0 && block.lines.length === 0) return;
+    if (model.points.length === 0 && model.lines.length === 0) return;
     onEditStart();
-    block.points = [];
-    block.lines = [];
+    model.points = [];
+    model.lines = [];
     selection = null;
     pending = null;
     redraw();
@@ -776,5 +759,38 @@ export function renderGraphBlock(block, options = {}) {
   updateToolButtons();
   redraw();
 
+  return plane;
+}
+
+// Standalone GRAPH block: a titled card wrapping the interactive plane plus a
+// block-delete control. attachBlockChrome (editor.js) adds the drag handle.
+export function renderGraphBlock(block, options = {}) {
+  const { onEditStart = () => {}, onChange = () => {}, onDelete = () => {} } = options;
+
+  const figure = document.createElement('figure');
+  figure.className = 'graphblock';
+  figure.setAttribute('dir', 'ltr');
+  figure.dataset.blockId = block.id;
+
+  const header = document.createElement('header');
+  header.className = 'graphblock__header';
+  header.setAttribute('dir', 'rtl');
+  const title = document.createElement('span');
+  title.className = 'graphblock__title';
+  title.textContent = 'גרף';
+  header.appendChild(title);
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'graphblock__delete';
+  del.textContent = '✕';
+  del.title = 'הסרת הגרף';
+  del.setAttribute('aria-label', 'הסרת הגרף');
+  del.addEventListener('pointerdown', (e) => e.stopPropagation());
+  del.addEventListener('click', () => onDelete(block.id));
+
+  const plane = buildGraphPlane(block, { onEditStart, onChange });
+
+  figure.append(header, del, plane);
   return figure;
 }
