@@ -218,6 +218,33 @@ export function isGraphBlock(block) {
   return !!(block && block.type === BLOCK.GRAPH);
 }
 
+let _graphLineCounter = 0;
+export function graphLineId() {
+  _graphLineCounter += 1;
+  return `gl_${Date.now().toString(36)}_${_graphLineCounter}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// A line in a graph block. Three kinds:
+//   'line'    — a straight line through p1 & p2, extended across the whole
+//               plane with arrowheads (8th-grade "the line through (1,2),(3,8)").
+//   'segment' — just the segment between p1 & p2 (endpoint dots, no arrows).
+//   'mxb'     — the function y = m·x + b, also extended with arrowheads.
+// p1/p2 are math {x,y} (snapped on placement); m/b are numbers. color is
+// assigned by the renderer from a small palette; showEquation drives the
+// "y = …" label (on for 'line' & 'mxb', off for a bare 'segment').
+export function newGraphLine({ kind, p1 = null, p2 = null, m = 1, b = 0, color = null } = {}) {
+  return {
+    id: graphLineId(),
+    kind,
+    p1,
+    p2,
+    m,
+    b,
+    color,
+    showEquation: kind !== 'segment'
+  };
+}
+
 export function newWorksheetBlock({ blobId, naturalWidth, naturalHeight }) {
   return {
     type: BLOCK.WORKSHEET,

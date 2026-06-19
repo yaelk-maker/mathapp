@@ -2317,6 +2317,114 @@ h1 {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Tool row: point / line / segment / function toggles. */
+.graphblock__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 6px 60px;
+}
+.graphblock__tool {
+  min-height: 36px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  color: #444;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.graphblock__tool:active { background: #f0f0f0; }
+.graphblock__tool--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+/* y=mx+b panel. */
+.graphblock__fn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* [hidden] alone is display:none in the UA sheet, but this author
+     display:flex outranks it — restore hiding explicitly. */
+}
+.graphblock__fn[hidden] { display: none; }
+.graphblock__fn:not([hidden]) {
+  display: flex;
+  gap: 10px;
+  margin: 0 12px 8px 12px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.graphblock__fn-preview {
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  min-width: 5.5em;
+}
+.graphblock__fn-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.graphblock__fn-cap {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.graphblock__fn-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--accent);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.graphblock__fn-btn:active { background: #eaf1ff; }
+.graphblock__fn-val {
+  min-width: 2.4em;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.graphblock__fn-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+.graphblock__fn-add {
+  min-height: 40px;
+  padding: 4px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.graphblock__fn-add:active { background: var(--accent-pressed); }
+.graphblock__fn-cancel {
+  min-height: 40px;
+  padding: 4px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  color: #555;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* --- Block drag-to-reorder --- */
 /* Every block (worksheet, workblock, textblock) gets a small handle in the
    top-start corner. Pointer events drive a translateY drag; a thin blue
