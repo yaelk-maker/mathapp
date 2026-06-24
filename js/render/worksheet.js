@@ -34,6 +34,16 @@ export async function renderWorksheetBlock(block, options = {}) {
   wrapper.className = 'worksheet';
   wrapper.dataset.blockId = block.id;
 
+  // Apply a shrunk display width (set by the corner resize handle). Anything
+  // ≥1 or unset renders at full width. When shrunk we add a modifier class
+  // that anchors the figure to the physical left, so the bottom-right resize
+  // handle grows the image predictably regardless of the page's RTL flow.
+  const widthFrac = typeof block.widthFrac === 'number' ? block.widthFrac : 1;
+  if (widthFrac > 0 && widthFrac < 1) {
+    wrapper.style.width = `${(widthFrac * 100).toFixed(2)}%`;
+    wrapper.classList.add('worksheet--sized');
+  }
+
   const img = document.createElement('img');
   img.className = 'worksheet__image';
   img.alt = '';
@@ -89,6 +99,23 @@ export async function renderWorksheetBlock(block, options = {}) {
   // gesture doesn't spawn stray annotations.
   bindCreateOnTap(overlay, block, options);
 
+  // Re-crop: re-open the crop UI on the already-uploaded image. Sits next to
+  // the delete button. Only present when the image actually loaded (no point
+  // cropping a missing blob).
+  if (options.onRecrop && url) {
+    const recrop = document.createElement('button');
+    recrop.type = 'button';
+    recrop.className = 'worksheet__recrop';
+    recrop.textContent = '✂';
+    recrop.title = 'חיתוך מחדש';
+    recrop.setAttribute('aria-label', 'חיתוך התמונה מחדש');
+    recrop.addEventListener('click', (e) => {
+      e.stopPropagation();
+      options.onRecrop(block.id);
+    });
+    wrapper.appendChild(recrop);
+  }
+
   if (options.onDelete) {
     const del = document.createElement('button');
     del.type = 'button';
@@ -103,6 +130,14 @@ export async function renderWorksheetBlock(block, options = {}) {
     wrapper.appendChild(del);
   }
 
+  // Corner resize handle: drag to scale the whole worksheet down (so a long
+  // blank work area below it isn't pushed off-screen, or to fit two sheets
+  // side by side). Width drives it; the image keeps its aspect ratio. Only
+  // wired when the image loaded and the editor passed resize callbacks.
+  if (options.onResized && url) {
+    bindWorksheetResize(wrapper, block, options);
+  }
+
   // Tap-to-collapse: in split view, tapping the worksheet shrinks it to a
   // thumbnail so the work block claims the freed space. Tap again to peek
   // back. The class is namespaced on the wrapper itself so split-mode CSS
@@ -110,12 +145,79 @@ export async function renderWorksheetBlock(block, options = {}) {
   // gated on `.editor--split`).
   wrapper.addEventListener('click', (e) => {
     if (e.target.closest('.worksheet__delete') ||
+        e.target.closest('.worksheet__recrop') ||
+        e.target.closest('.worksheet__resize') ||
         e.target.closest('.block__handle') ||
         e.target.closest('.worksheet__overlay')) return;
     wrapper.classList.toggle('worksheet--collapsed');
   });
 
   return wrapper;
+}
+
+// Corner drag-to-resize for a worksheet image. The figure is anchored to the
+// physical left when sized (see .worksheet--sized), so the new width is simply
+// the distance from the figure's left edge to the pointer, as a fraction of
+// the available page width. Clamped to [0.25, 1] — small enough to park a
+// sheet in a corner, never larger than the column. Undo snapshot on the first
+// move; persist (and reflow the pencil canvas) on release.
+function bindWorksheetResize(wrapper, block, options) {
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'worksheet__resize';
+  handle.textContent = '⤡';
+  handle.title = 'גרור כדי לשנות גודל';
+  handle.setAttribute('aria-label', 'שינוי גודל הדף');
+  handle.addEventListener('mousedown', (e) => e.preventDefault());
+  handle.addEventListener('click', (e) => { e.stopPropagation(); });
+
+  let pointerId = null;
+  let parentW = 0;
+  let leftEdge = 0;
+  let moved = false;
+
+  handle.addEventListener('pointerdown', (e) => {
+    if (pointerId !== null) return;
+    const parent = wrapper.parentElement;
+    if (!parent) return;
+    const parentRect = parent.getBoundingClientRect();
+    if (parentRect.width === 0) return;
+    pointerId = e.pointerId;
+    parentW = parentRect.width;
+    leftEdge = wrapper.getBoundingClientRect().left;
+    moved = false;
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pointerId) return;
+    const widthPx = e.clientX - leftEdge;
+    let frac = widthPx / parentW;
+    frac = Math.max(0.25, Math.min(1, frac));
+    if (!moved) {
+      moved = true;
+      if (options.onResizeStart) options.onResizeStart(block.id);
+    }
+    block.widthFrac = frac;
+    if (frac < 1) {
+      wrapper.style.width = `${(frac * 100).toFixed(2)}%`;
+      wrapper.classList.add('worksheet--sized');
+    } else {
+      wrapper.style.width = '';
+      wrapper.classList.remove('worksheet--sized');
+    }
+  });
+  const end = (e) => {
+    if (e.pointerId !== pointerId) return;
+    pointerId = null;
+    try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (moved && options.onResized) options.onResized(block.id);
+  };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+
+  wrapper.appendChild(handle);
 }
 
 // Free object URLs when leaving the editor.
@@ -471,12 +573,25 @@ function buildGraphAnnotationEl(annot, block, options) {
   bindAnnotHandle(menuBtn, el, annot, block, options, enterGraphManipulateMode);
   el.appendChild(menuBtn);
 
+  // Persistent corner resize handle. Unlike text/grid annotations (which only
+  // expose resize inside manipulate mode), a graph is a sizeable object the
+  // kid routinely needs to scale to fit the answer space — so the corner grip
+  // is always available, no mode-switch required. Dragging it scales the
+  // whole plane (width drives it; the plot keeps its aspect ratio). overlay is
+  // resolved lazily by bindResize since `el` isn't attached to the overlay yet.
+  const resize = document.createElement('div');
+  resize.className = 'worksheet__annot-resize';
+  resize.setAttribute('aria-hidden', 'true');
+  el.appendChild(resize);
+  bindResize(resize, el, annot, block, null, options);
+
   return el;
 }
 
-// Manipulate mode for a graph annotation: a resize handle plus a minimal
-// delete/done chrome. Dragging is handled by the "⋮⋮" handle (not the body,
-// which is the plotting surface), so we don't bind body-drag here.
+// Manipulate mode for a graph annotation: a minimal delete/done chrome.
+// Resizing is always available via the persistent corner handle (added in
+// buildGraphAnnotationEl), and dragging is handled by the "⋮⋮" handle (not the
+// body, which is the plotting surface), so we don't add either here.
 function enterGraphManipulateMode(el, annot, block, options) {
   if (el.classList.contains('worksheet__annot--manipulate')) return;
   el.classList.add('worksheet__annot--manipulate');
@@ -484,7 +599,6 @@ function enterGraphManipulateMode(el, annot, block, options) {
     options.onAnnotationManipulateStart(block.id, annot.id);
   }
 
-  const overlay = el.closest('.worksheet__overlay');
   const chrome = document.createElement('div');
   chrome.className = 'worksheet__annot-chrome';
   const mkBtn = (label, title, onClick) => {
@@ -507,16 +621,9 @@ function enterGraphManipulateMode(el, annot, block, options) {
   const rect = el.getBoundingClientRect();
   if (rect.top < 60) chrome.classList.add('worksheet__annot-chrome--flip-below');
 
-  const handle = document.createElement('div');
-  handle.className = 'worksheet__annot-resize';
-  handle.setAttribute('aria-hidden', 'true');
-  el.appendChild(handle);
-  bindResize(handle, el, annot, block, overlay, options);
-
   function exitManipulateMode() {
     el.classList.remove('worksheet__annot--manipulate');
     chrome.remove();
-    handle.remove();
     document.removeEventListener('pointerdown', onOutside, true);
   }
   const onOutside = (e) => {
@@ -888,12 +995,16 @@ function bindDrag(el, annot, block, overlay, options) {
   el.addEventListener('pointercancel', endDrag);
 }
 
+// `overlay` may be null when the handle is wired before the annotation is
+// attached (the persistent graph resize handle). In that case we resolve the
+// overlay lazily from the live DOM at gesture time.
 function bindResize(handle, el, annot, block, overlay, options) {
   let startClientX = 0;
   let startW = 0;
   let startX = 0;
   let pointerId = null;
   let moved = false;
+  const getOverlay = () => overlay || el.closest('.worksheet__overlay');
 
   handle.addEventListener('pointerdown', (e) => {
     if (pointerId !== null) return;
@@ -908,7 +1019,9 @@ function bindResize(handle, el, annot, block, overlay, options) {
   });
   handle.addEventListener('pointermove', (e) => {
     if (e.pointerId !== pointerId) return;
-    const rect = overlay.getBoundingClientRect();
+    const ov = getOverlay();
+    if (!ov) return;
+    const rect = ov.getBoundingClientRect();
     if (rect.width === 0) return;
     const dx = (e.clientX - startClientX) / rect.width;
     moved = true;

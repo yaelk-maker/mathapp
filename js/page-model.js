@@ -252,6 +252,10 @@ export function newWorksheetBlock({ blobId, naturalWidth, naturalHeight }) {
     blobId,
     naturalWidth: naturalWidth || 0,
     naturalHeight: naturalHeight || 0,
+    // Rendered width as a fraction (0..1) of the available page width. 1 =
+    // full width (the default). The kid shrinks it by dragging the corner
+    // resize handle. Stored on the block so the size survives reloads.
+    widthFrac: 1,
     annotations: []
   };
 }

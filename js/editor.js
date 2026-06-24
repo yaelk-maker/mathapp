@@ -11,6 +11,8 @@ import {
   getNotebook,
   savePage,
   renameNotebook,
+  getBlob,
+  putBlob,
   deleteBlob,
   listStrokesByPage,
   addStroke,
@@ -59,7 +61,8 @@ import {
 import { renderKeypad, keyboardEventToCode } from './input/keypad.js';
 import { renderHebrewKeypad } from './input/hebrew-keypad.js';
 import { renderEnglishKeypad } from './input/english-keypad.js';
-import { uploadWorksheet } from './io/import.js';
+import { uploadWorksheet, readImageDimensions } from './io/import.js';
+import { cropImageFile } from './io/cropper.js';
 import { exportSingleNotebookToJSON, shareJSON } from './io/export.js';
 import { attachPencilSurface } from './input/pencil.js';
 import { confirmDialog, promptDialog, notifySaveError, toast } from './ui/dialog.js';
@@ -68,7 +71,10 @@ const CHAR_KEYS = new Set([
   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
   '+', '−', '×', '÷', '=', '.', '(', ')', '%',
   'x', 'y', 'a', 'b',
-  '<', '>', '≤', '≥'
+  '<', '>', '≤', '≥',
+  // Literal slash — the keypad's √ key was replaced by '/' on request. It
+  // inserts as a one-character atom like any operator.
+  '/'
 ]);
 
 // Inside a fraction slot we can't open a nested composite (slots are plain
@@ -90,7 +96,12 @@ const COMPOSITE_KEYS = {
   // exp is already filled (see special-case in insertComposite).
   SQUARE: () => newPowCell('', '2'),
   SQRT: () => newSqrtCell(),
-  NROOT: () => newNRootCell(),
+  // ⁿ√ doubles as the square-root key now that the standalone √ is gone, so
+  // pre-fill the index with '2'. insertComposite drops the cursor straight
+  // into the radicand (see the nroot entry-slot branch there), making a
+  // square root as quick as the old √. The kid presses ↑ onto the index to
+  // change it (3, 4, …) for other roots.
+  NROOT: () => newNRootCell('2'),
   ABS: () => newAbsCell()
 };
 
@@ -967,7 +978,17 @@ export async function mountEditor(root, notebookId) {
           onAnnotationManipulateStart: (_blockId, _annotId) => pushUndo(),
           onDeleteAnnotation: deleteAnnotation,
           focusedGridAnnot: gridFocus,
-          onGridAnnotCellTap: focusGridAnnotCell
+          onGridAnnotCellTap: focusGridAnnotCell,
+          // Re-crop the already-uploaded image (re-opens the crop UI).
+          onRecrop: (id) => recropWorksheet(id),
+          // Resize the worksheet by dragging its corner. Snapshot for undo
+          // when the drag starts; persist + re-fit the pencil canvas when it
+          // ends (width changed → the page reflowed).
+          onResizeStart: () => pushUndo(),
+          onResized: () => {
+            queueSave();
+            requestAnimationFrame(() => resizeAndReplay());
+          }
         });
       } else if (block.type === BLOCK.WORK) {
         // Only the active work block carries a cursor — without this every
@@ -1753,6 +1774,43 @@ export async function mountEditor(root, notebookId) {
       revokeBlobUrl(block.blobId);
       await deleteBlob(block.blobId);
     }
+    await savePage(page);
+    await renderBlocks();
+  }
+
+  // Re-crop an already-placed worksheet image. Loads the stored blob back into
+  // the same crop UI used at upload time, then swaps in the result under a
+  // fresh blobId (so the cached object URL doesn't stick to the old bytes) and
+  // drops the old blob. Annotations keep their fractional positions; they may
+  // need nudging if the crop changed the aspect ratio, but nothing is lost.
+  async function recropWorksheet(blockId) {
+    const block = page.blocks.find((b) => b.id === blockId);
+    if (!block || block.type !== BLOCK.WORKSHEET || !block.blobId) return;
+    const blob = await getBlob(block.blobId);
+    if (!blob) {
+      toast('לא הצלחנו לטעון את התמונה לחיתוך.', { kind: 'error', duration: 3500 });
+      return;
+    }
+    const file = new File([blob], 'worksheet.jpg', { type: blob.type || 'image/jpeg' });
+    const result = await cropImageFile(file);
+    // null = cancelled; the same File reference back = "use whole image"
+    // (nothing to change since we fed it the current image).
+    if (!result || result === file) return;
+
+    pushUndo();
+    const newBlobId = `blob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    await putBlob(newBlobId, result);
+    const oldBlobId = block.blobId;
+    block.blobId = newBlobId;
+    try {
+      const dims = await readImageDimensions(result);
+      block.naturalWidth = dims.naturalWidth;
+      block.naturalHeight = dims.naturalHeight;
+    } catch (_) {
+      // Non-fatal — render works without dimensions.
+    }
+    revokeBlobUrl(oldBlobId);
+    await deleteBlob(oldBlobId);
     await savePage(page);
     await renderBlocks();
   }
@@ -3549,7 +3607,12 @@ export async function mountEditor(root, notebookId) {
     activeWorkBlock.cells[`${targetR},${targetC}`] = template;
     const slots = compositeSlots(template);
     updateCell(activeGrid, activeWorkBlock, targetR, targetC);
-    moveCursorTo(targetR, targetC, slots[0] || null);
+    // ⁿ√ ships with its index pre-filled to '2' (square root by default), so
+    // skip the index slot and land in the radicand ready for the number.
+    const entrySlot = (template.type === 'nroot' && template.index)
+      ? 'radicand'
+      : (slots[0] || null);
+    moveCursorTo(targetR, targetC, entrySlot);
     queueSave();
   }
 

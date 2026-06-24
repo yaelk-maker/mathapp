@@ -866,6 +866,64 @@ h1 {
 }
 .worksheet__delete:active { background: rgba(0, 0, 0, 0.8); }
 
+/* Re-crop button — sits just left of the delete button (same pill styling)
+   so the two image controls cluster in the top-right corner. */
+.worksheet__recrop {
+  position: absolute;
+  top: 8px;
+  right: 60px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: white;
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.1s ease;
+}
+.worksheet__recrop:active { background: rgba(0, 0, 0, 0.8); }
+
+/* When shrunk below full width, anchor the figure to the physical left so the
+   bottom-right resize handle grows the image toward the finger in both LTR
+   and the app's RTL flow. (margin-left:auto absorbs the free space on the
+   right, pinning the left edge.) */
+.worksheet--sized {
+  margin-right: auto;
+}
+
+/* Corner resize handle — mirrors the work-block resize grip so the gesture is
+   familiar. Pinned to the bottom-right (physical) corner of the figure. */
+.worksheet__resize {
+  position: absolute;
+  bottom: -18px;
+  right: -18px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: white;
+  color: var(--accent);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: nwse-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 4;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+.worksheet__resize:active { background: rgba(11, 108, 242, 0.08); }
+
 /* --- Worksheet annotation overlay ---
    Floats on top of the worksheet image and hosts the kid's typed answers.
    container-type:size makes the overlay a sizing container so each
@@ -1261,17 +1319,22 @@ h1 {
    kid then sees a small ⌨ pill that brings the keypad back. */
 .editor__keypad-handle {
   position: absolute;
-  top: -4px;
+  /* Sit fully ABOVE the keypad (translate -100%) so the bigger target never
+     overlaps the top row of keys. The previous 56×18 straddling pill was far
+     under the 44px accessibility minimum the rest of the app uses, so the kid
+     couldn't reliably hit it to dismiss the keyboard. */
+  top: 0;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -100%);
   z-index: 4;
-  width: 56px;
-  height: 18px;
-  border-radius: 999px;
+  width: 104px;
+  height: 34px;
+  border-radius: 999px 999px 0 0;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.92);
+  border-bottom: none;
+  background: rgba(255, 255, 255, 0.96);
   color: var(--muted);
-  font-size: 0.6875rem;
+  font-size: 1.375rem;
   line-height: 1;
   cursor: pointer;
   padding: 0;
@@ -2445,16 +2508,36 @@ h1 {
   position: absolute;
   /* min width so the plane stays usable even if dragged small */
   min-width: 140px;
-  background: rgba(255, 255, 255, 0.96);
+  /* Transparent so the graph no longer hides the worksheet question
+     underneath (the opaque white card used to cover the exercise text — see
+     the reported overlap). The worksheet shows through the plane; only the
+     axes/points/lines and the toolbar sit on top. A faint dashed outline
+     keeps the graph's footprint locatable for moving and corner-resizing. */
+  background: transparent;
+  border: 1px dashed rgba(18, 13, 14, 0.25);
   border-radius: 10px;
   padding: 6px 2px 2px;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.18);
   box-sizing: border-box;
+}
+/* Keep the toolbar (point/line/segment/y=mx+b + read-out) legible against
+   whatever worksheet text it lands on, without re-introducing a full opaque
+   card over the question. */
+.worksheet__annot--graph .graphplane__bar {
+  background: rgba(251, 250, 248, 0.9);
+  border-radius: 8px;
 }
 /* The plot fills the annotation width (the block's 460px cap doesn't apply
    here — the annotation's own width controls the size). */
 .worksheet__annot--graph .graphblock__plot {
   max-width: none;
+}
+/* The plot's own SVG carries an opaque card background in the standalone
+   block — that's what was hiding the worksheet question. On a worksheet we
+   make it translucent so the exercise shows through while the axes, points
+   and gridlines stay readable enough to plot against. (The standalone GRAPH
+   block keeps its solid background — it sits on a clean page, no overlap.) */
+.worksheet__annot--graph .graphblock__svg {
+  background: rgba(255, 255, 255, 0.6);
 }
 .worksheet__annot--graph.worksheet__annot--manipulate {
   outline: 2px solid var(--accent);
@@ -2663,9 +2746,17 @@ h1 {
      like the page is cropping content at both edges. */
   .block__handle,
   .worksheet__delete,
+  .worksheet__recrop,
+  .worksheet__resize,
   .workblock__delete,
   .workblock__resize,
-  .workblock__cols {
+  .workblock__cols,
+  /* Annotation chrome: the graph/grid "⋮⋮" drag handle and the corner resize
+     grip. The graph resize grip is now persistent (always available, not just
+     in manipulate mode), so it must be hidden here or it prints as a stray
+     blue dot at the corner of every on-worksheet graph. */
+  .gridannot__menu,
+  .worksheet__annot-resize {
     display: none !important;
   }
   .editor--full {
