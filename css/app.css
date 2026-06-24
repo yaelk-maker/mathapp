@@ -866,6 +866,64 @@ h1 {
 }
 .worksheet__delete:active { background: rgba(0, 0, 0, 0.8); }
 
+/* Re-crop button — sits just left of the delete button (same pill styling)
+   so the two image controls cluster in the top-right corner. */
+.worksheet__recrop {
+  position: absolute;
+  top: 8px;
+  right: 60px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: white;
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.1s ease;
+}
+.worksheet__recrop:active { background: rgba(0, 0, 0, 0.8); }
+
+/* When shrunk below full width, anchor the figure to the physical left so the
+   bottom-right resize handle grows the image toward the finger in both LTR
+   and the app's RTL flow. (margin-left:auto absorbs the free space on the
+   right, pinning the left edge.) */
+.worksheet--sized {
+  margin-right: auto;
+}
+
+/* Corner resize handle — mirrors the work-block resize grip so the gesture is
+   familiar. Pinned to the bottom-right (physical) corner of the figure. */
+.worksheet__resize {
+  position: absolute;
+  bottom: -18px;
+  right: -18px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: white;
+  color: var(--accent);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: nwse-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 4;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+.worksheet__resize:active { background: rgba(11, 108, 242, 0.08); }
+
 /* --- Worksheet annotation overlay ---
    Floats on top of the worksheet image and hosts the kid's typed answers.
    container-type:size makes the overlay a sizing container so each
@@ -2688,6 +2746,8 @@ h1 {
      like the page is cropping content at both edges. */
   .block__handle,
   .worksheet__delete,
+  .worksheet__recrop,
+  .worksheet__resize,
   .workblock__delete,
   .workblock__resize,
   .workblock__cols,
