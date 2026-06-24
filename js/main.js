@@ -25,8 +25,14 @@ import {
   pickJSONFile,
   readJSONFile
 } from './io/export.js';
-import { confirmDialog, promptDialog, pickDialog, toast, notifySaveError } from './ui/dialog.js';
+import { confirmDialog, promptDialog, pickDialog, settingsDialog, toast, notifySaveError } from './ui/dialog.js';
 import { installSystemKeyboardBridge } from './ui/system-keyboard.js';
+import {
+  isGraphAdvancedToolsEnabled,
+  setGraphAdvancedToolsEnabled,
+  isSplitEnabled,
+  setSplitEnabled
+} from './settings.js';
 
 // Press-and-hold duration for the destructive notebook delete. Matches the
 // 700ms transition on .notebook-card__delete--arming so the visual fill
@@ -170,6 +176,7 @@ async function renderHome() {
         <button class="btn btn--ghost" id="open-trash">🗑️ נמחקו לאחרונה${
           trashCount > 0 ? ` (${trashCount})` : ''
         }</button>
+        <button class="btn btn--ghost" id="open-settings" aria-label="הגדרות" title="הגדרות">⚙️ הגדרות</button>
       </div>
       <input type="search" class="search-input" id="notebook-search"
              placeholder="חיפוש לפי שם או תאריך..." aria-label="חיפוש מחברות"
@@ -221,6 +228,26 @@ async function renderHome() {
 
   document.getElementById('open-trash').addEventListener('click', () => {
     window.location.hash = '#/trash';
+  });
+
+  document.getElementById('open-settings').addEventListener('click', () => {
+    settingsDialog({
+      title: 'הגדרות',
+      items: [
+        {
+          label: 'כלי קו ופונקציה בגרף',
+          description: 'הצגת הכלים "קו" ו-"y=mx+b" במערכת הצירים (בגרף נפרד ובגרף על דף).',
+          get: isGraphAdvancedToolsEnabled,
+          set: setGraphAdvancedToolsEnabled
+        },
+        {
+          label: 'מסך מפוצל',
+          description: 'פתיחת מחברת עם הדף לצד אזור הפתרון במקום מעליו.',
+          get: isSplitEnabled,
+          set: setSplitEnabled
+        }
+      ]
+    });
   });
 
   const backupAllBtn = document.getElementById('backup-all');
