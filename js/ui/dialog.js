@@ -300,6 +300,92 @@ export function pickDialog({
   });
 }
 
+// Hebrew settings dialog — a list of on/off toggles. Each item is
+// `{ label, description, get, set }`: `get()` returns the current boolean,
+// `set(next)` persists the new value (called immediately on each toggle, so
+// the dialog has no separate "save" — closing just dismisses). Resolves when
+// the kid taps "סגירה" / Escape.
+export function settingsDialog({ title = 'הגדרות', items = [] } = {}) {
+  return new Promise((resolve) => {
+    const overlay = buildOverlay();
+    const dialog = buildDialog();
+
+    const titleEl = document.createElement('h2');
+    titleEl.className = 'dialog__title';
+    titleEl.textContent = title;
+    dialog.appendChild(titleEl);
+
+    for (const item of items) {
+      const row = document.createElement('div');
+      row.className = 'dialog__setting';
+
+      const text = document.createElement('div');
+      text.className = 'dialog__setting-text';
+      const label = document.createElement('div');
+      label.className = 'dialog__setting-label';
+      label.textContent = item.label;
+      text.appendChild(label);
+      if (item.description) {
+        const desc = document.createElement('div');
+        desc.className = 'dialog__setting-desc';
+        desc.textContent = item.description;
+        text.appendChild(desc);
+      }
+
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'dialog__switch';
+      sw.setAttribute('role', 'switch');
+      const paint = (on) => {
+        sw.classList.toggle('dialog__switch--on', on);
+        sw.setAttribute('aria-checked', on ? 'true' : 'false');
+      };
+      paint(!!item.get());
+      sw.setAttribute('aria-label', item.label);
+      sw.addEventListener('click', () => {
+        const next = !item.get();
+        item.set(next);
+        paint(next);
+      });
+
+      row.appendChild(text);
+      row.appendChild(sw);
+      dialog.appendChild(row);
+    }
+
+    const buttons = document.createElement('div');
+    buttons.className = 'dialog__buttons';
+    const doneBtn = document.createElement('button');
+    doneBtn.type = 'button';
+    doneBtn.className = 'dialog__btn dialog__btn--primary';
+    doneBtn.textContent = 'סגירה';
+    buttons.appendChild(doneBtn);
+    dialog.appendChild(buttons);
+    overlay.appendChild(dialog);
+
+    const close = () => {
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      resolve();
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape' || event.key === 'Enter') {
+        event.preventDefault();
+        close();
+      }
+    };
+    doneBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close();
+    });
+    document.addEventListener('keydown', onKey, true);
+
+    document.body.appendChild(overlay);
+    trapFocus(dialog);
+    doneBtn.focus();
+  });
+}
+
 // Lightweight Hebrew toast for non-blocking confirmations like "שוחזרו N
 // מחברות". Replaces the alert() calls in main.js so we don't pop the native
 // English-chrome banner.

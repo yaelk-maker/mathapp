@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v66';
+const CACHE = 'mathapp-shell-v67';
 const SHELL = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ const SHELL = [
   './js/main.js',
   './js/editor.js',
   './js/db.js',
+  './js/settings.js',
   './js/page-model.js',
   './js/render/grid.js',
   './js/render/worksheet.js',

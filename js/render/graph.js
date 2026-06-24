@@ -15,6 +15,7 @@
 // pen mode is on the canvas captures pointers and the plane is inert.
 
 import { graphPointId, newGraphLine } from '../page-model.js';
+import { isGraphAdvancedToolsEnabled } from '../settings.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const MINUS = '−'; // proper minus sign for equation labels
@@ -214,11 +215,20 @@ export function buildGraphPlane(model, options = {}) {
     btn.title = titleText;
     return btn;
   };
+  // Line (קו) and function (y=mx+b) are gated behind the home-screen setting
+  // "כלי קו ופונקציה בגרף" — off by default. When disabled the kid only sees
+  // נקודה / קטע; existing lines still render and can be tapped to delete, but
+  // no new line/function can be created. Order preserved (point, line,
+  // segment, fn) when both are shown.
+  const advancedTools = isGraphAdvancedToolsEnabled();
   const tPoint = mkTool('נקודה', 'point', 'הקישי על הרשת להוספת נקודה');
-  const tLine = mkTool('קו', 'line', 'הקישי על שתי נקודות ליצירת קו ישר');
   const tSeg = mkTool('קטע', 'segment', 'הקישי על שתי נקודות ליצירת קטע');
-  const tFn = mkTool('y=mx+b', 'fn', 'הוספת פונקציה לפי שיפוע וחיתוך');
-  tools.append(tPoint, tLine, tSeg, tFn);
+  const tLine = advancedTools ? mkTool('קו', 'line', 'הקישי על שתי נקודות ליצירת קו ישר') : null;
+  const tFn = advancedTools ? mkTool('y=mx+b', 'fn', 'הוספת פונקציה לפי שיפוע וחיתוך') : null;
+  tools.append(tPoint);
+  if (tLine) tools.append(tLine);
+  tools.append(tSeg);
+  if (tFn) tools.append(tFn);
 
   const readout = document.createElement('span');
   readout.className = 'graphblock__readout';
@@ -497,7 +507,7 @@ export function buildGraphPlane(model, options = {}) {
   };
 
   tPoint.addEventListener('click', () => setMode('point'));
-  tLine.addEventListener('click', () => setMode('line'));
+  if (tLine) tLine.addEventListener('click', () => setMode('line'));
   tSeg.addEventListener('click', () => setMode('segment'));
 
   // ---------- y=mx+b panel ----------
@@ -609,10 +619,12 @@ export function buildGraphPlane(model, options = {}) {
     updateToolButtons();
   }
 
-  tFn.addEventListener('click', () => {
-    if (fnOpen) { closeFnPanel(); redraw(); }
-    else { setMode('point'); openFnPanel(); }
-  });
+  if (tFn) {
+    tFn.addEventListener('click', () => {
+      if (fnOpen) { closeFnPanel(); redraw(); }
+      else { setMode('point'); openFnPanel(); }
+    });
+  }
 
   // ---------- canvas pointer handling ----------
   const clientToMath = (clientX, clientY) => {

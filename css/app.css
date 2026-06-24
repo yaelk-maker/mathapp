@@ -2964,6 +2964,61 @@ body.system-kbd-up .editor__keypad-host {
   font-weight: 600;
 }
 
+/* --- Settings dialog rows + toggle switch --- */
+.dialog__setting {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.dialog__setting:last-of-type { border-bottom: none; }
+.dialog__setting-text { flex: 1 1 auto; min-width: 0; }
+.dialog__setting-label {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.dialog__setting-desc {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.35;
+}
+/* iOS-style switch. Off = neutral track; on = accent track with the knob
+   slid to the far side. 44px tall hit target for reduced fine-motor control. */
+.dialog__switch {
+  flex: 0 0 auto;
+  appearance: none;
+  border: none;
+  padding: 0;
+  width: 52px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.dialog__switch::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  /* Knob parks on the start (right, in RTL) side when off. */
+  inset-inline-start: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.dialog__switch--on { background: var(--accent); }
+/* Slide the knob to the far (end) side when on. Negative in RTL moves it
+   leftward; the 20px travel = track width − knob − paddings. */
+.dialog__switch--on::before { transform: translateX(-20px); }
+
 /* --- English keypad ---
    Layout matches iPadOS English: 10-9-9 letter rows, punctuation strip,
    then a bottom row with mode toggles, wide space, and an arrow cluster.
