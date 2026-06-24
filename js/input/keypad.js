@@ -1,8 +1,11 @@
 // Math keypad. Each press calls onKey(code) where code is one of:
 //   character keys (single-char atoms): '0'-'9', '+', '−', '×', '÷', '=',
 //                                       '.', '(', ')', 'x', 'y', 'a', 'b',
-//                                       '<', '>', '≤', '≥'
-//   composite-creating keys: 'FRAC', 'POW', 'SQRT', 'SQUARE', 'NROOT'
+//                                       '<', '>', '≤', '≥', '/'
+//   composite-creating keys: 'FRAC', 'POW', 'SQUARE', 'NROOT'
+//   ('/' replaced the standalone √ key by request; square roots are now
+//    written with ⁿ√ — type the index 2 then the radicand. The SQRT
+//    composite still exists in the model so legacy notebooks render.)
 //   actions: 'BACKSPACE', 'LEFT', 'RIGHT', 'UP', 'DOWN', 'EXIT', 'SPACE',
 //            'TOGGLE_KEYPAD'
 //
@@ -39,8 +42,11 @@ const KEYS = [
   { code: 'BACKSPACE', label: '⌫', kind: 'edit', span: 2,
     title: 'מחק (החזקה למחיקה רציפה)', repeat: true },
   // ── Row 2 ────────────────────────────────────────────────────────────
-  { code: 'SQRT', label: '√', kind: 'comp', title: 'שורש' },
-  { code: 'NROOT', label: 'ⁿ√', kind: 'comp', title: 'שורש n-י' },
+  // Slash. Replaced the standalone √ key by request: the kid wanted a "/"
+  // without changing the layout, so it sits where √ was. Square roots are
+  // now written with the ⁿ√ key (index 2 + radicand) one column over.
+  { code: '/', label: '/', kind: 'op', title: 'לוכסן' },
+  { code: 'NROOT', label: 'ⁿ√', kind: 'comp', title: 'שורש (לשורש ריבועי: 2 ואז המספר)' },
   { code: 'b', label: 'b', kind: 'var' },
   { code: '4', label: '4' },
   { code: '5', label: '5' },

@@ -68,7 +68,10 @@ const CHAR_KEYS = new Set([
   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
   '+', '−', '×', '÷', '=', '.', '(', ')', '%',
   'x', 'y', 'a', 'b',
-  '<', '>', '≤', '≥'
+  '<', '>', '≤', '≥',
+  // Literal slash — the keypad's √ key was replaced by '/' on request. It
+  // inserts as a one-character atom like any operator.
+  '/'
 ]);
 
 // Inside a fraction slot we can't open a nested composite (slots are plain
