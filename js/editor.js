@@ -1650,6 +1650,49 @@ export async function mountEditor(root, notebookId) {
       return nextExerciseLabel(prev) || String(wbs.length + 1);
     };
 
+    // Multi-page PDF into a pristine notebook: consume the pre-seeded
+    // blank exercises instead of stacking them all under page 1. A fresh
+    // notebook seeds five empty work blocks (great for typing without any
+    // upload, and for a single photographed sheet with several questions)
+    // — but with a multi-page PDF that layout left five empty grids in
+    // section 1 while pages 2+ got new blocks labeled 6, 7, …. Here each
+    // PDF page pairs with one of the existing empty blocks (so labels run
+    // 1, 2, … matching the pages) and leftover empties are dropped — the
+    // kid adds more work areas per page with ➕ תרגיל חדש as needed.
+    // "Pristine" is strict: no worksheet/graph blocks, nothing typed, no
+    // row labels, no pencil strokes — so this can never discard work.
+    if (!hasExistingWorksheet && newWs.length > 1) {
+      const workBlocks = page.blocks.filter((b) => b.type === BLOCK.WORK);
+      const isEmptyWb = (b) =>
+        (!b.cells || Object.keys(b.cells).length === 0) &&
+        (!b.rowLabels || Object.keys(b.rowLabels).length === 0);
+      const pristine =
+        workBlocks.length > 0 &&
+        page.blocks.every((b) => b.type === BLOCK.WORK) &&
+        workBlocks.every(isEmptyWb) &&
+        strokes.length === 0;
+      if (pristine) {
+        const paired = [];
+        let prevLabel = '';
+        newWs.forEach((ws, i) => {
+          paired.push(ws);
+          const wb = workBlocks[i] ||
+            newWorkBlock({ label: nextExerciseLabel(prevLabel) || String(i + 1) });
+          paired.push(wb);
+          prevLabel = wb.label;
+        });
+        page.blocks = paired;
+        activeSectionIndex = 0;
+        activeWorkBlock = workBlocks[0];
+        cursor.r = 0;
+        cursor.c = MARGIN_COLS;
+        cursor.slot = null;
+        await savePage(page);
+        await renderBlocks();
+        return;
+      }
+    }
+
     if (!hasExistingWorksheet) {
       // First worksheet on the page — insert it ahead of the implicit
       // first work block so the kid's existing work area is paired with
