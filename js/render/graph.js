@@ -192,6 +192,13 @@ export function buildGraphPlane(model, options = {}) {
   const tickStep = model.tickStep > 0 ? model.tickStep : 1;
   if (!Array.isArray(model.points)) model.points = [];
   if (!Array.isArray(model.lines)) model.lines = [];
+  // Coordinate labels — "(x, y)" text the kid places on the plane and fills
+  // in himself (the classic "write the coordinates of the point" exercise).
+  // Each is { id, x, y, vx, vy }: (x, y) anchors the label on the plane,
+  // (vx, vy) are the VALUES he entered — deliberately independent of the
+  // anchor, so a wrong answer stays his answer and the label can sit
+  // beside a point without covering it.
+  if (!Array.isArray(model.labels)) model.labels = [];
 
   const vbW = (view.xMax - view.xMin) * UNIT + PAD * 2;
   const vbH = (view.yMax - view.yMin) * UNIT + PAD * 2;
@@ -225,9 +232,13 @@ export function buildGraphPlane(model, options = {}) {
   const tSeg = mkTool('קטע', 'segment', 'הקש על שתי נקודות ליצירת קטע');
   const tLine = advancedTools ? mkTool('קו', 'line', 'הקש על שתי נקודות ליצירת קו ישר') : null;
   const tFn = advancedTools ? mkTool('y=mx+b', 'fn', 'הוספת פונקציה לפי שיפוע וחיתוך') : null;
+  // Coordinate-label tool — not gated behind the advanced setting; writing
+  // "(x, y)" next to a point is core plotting practice, same tier as נקודה.
+  const tCoord = mkTool('(x,y)', 'coord', 'תווית שיעורים — הקש על הרשת במקום שבו תרצה את התווית ומלא את השיעורים');
   tools.append(tPoint);
   if (tLine) tools.append(tLine);
   tools.append(tSeg);
+  tools.append(tCoord);
   if (tFn) tools.append(tFn);
 
   const readout = document.createElement('span');
@@ -248,6 +259,14 @@ export function buildGraphPlane(model, options = {}) {
   fnPanel.className = 'graphblock__fn';
   fnPanel.setAttribute('dir', 'ltr');
   fnPanel.hidden = true;
+
+  // ---- coordinate-label panel ----
+  // Reuses the fn-panel class so it inherits the stepper styling AND the
+  // print-CSS hide (interaction chrome must never print).
+  const coordPanel = document.createElement('div');
+  coordPanel.className = 'graphblock__fn graphblock__coord';
+  coordPanel.setAttribute('dir', 'ltr');
+  coordPanel.hidden = true;
 
   // ---- plot ----
   const plot = document.createElement('div');
@@ -329,12 +348,14 @@ export function buildGraphPlane(model, options = {}) {
   gLabels.appendChild(mkText(yTop.px + 14, yTop.py + 4, 'y', 'middle'));
   svg.appendChild(gLabels);
 
-  // Dynamic layers: lines below points; equations above lines; ghost on top.
+  // Dynamic layers: lines below points; equations above lines; coordinate
+  // labels above everything the kid draws; ghost on top.
   const gLines = svgEl('g', { class: 'graphblock__lines' });
   const gPoints = svgEl('g', { class: 'graphblock__points' });
   const gEquations = svgEl('g', { class: 'graphblock__equations' });
+  const gCoordLabels = svgEl('g', { class: 'graphblock__coordlabels' });
   const gGhost = svgEl('g', { class: 'graphblock__ghost' });
-  svg.append(gLines, gPoints, gEquations, gGhost);
+  svg.append(gLines, gPoints, gEquations, gCoordLabels, gGhost);
 
   // Delete-selected button (HTML overlay, shown only while something is selected).
   const delSel = document.createElement('button');
@@ -343,18 +364,26 @@ export function buildGraphPlane(model, options = {}) {
   delSel.hidden = true;
 
   plot.append(svg, delSel);
-  plane.append(bar, fnPanel, plot);
+  plane.append(bar, fnPanel, coordPanel, plot);
 
   // ---------- state ----------
-  let mode = 'point';            // 'point' | 'line' | 'segment'
-  let selection = null;          // { type:'point'|'line', id }
+  let mode = 'point';            // 'point' | 'line' | 'segment' | 'coord'
+  let selection = null;          // { type:'point'|'line'|'label', id }
   let pending = null;            // first endpoint {x,y} while drawing a line/segment
   let fnOpen = false;
   let fnDraft = { m: 1, b: 0 };
   let fnEditId = null;           // when editing an existing 'mxb' line
+  let coordOpen = false;
+  // Draft label: anchor is where the tap landed; vx/vy are the values the
+  // kid steps to. Values start at 0 (NOT at the anchor position) — filling
+  // in the coordinates is his exercise, not the app's.
+  let coordDraft = { anchor: null, vx: 0, vy: 0 };
+  let coordEditId = null;        // when editing an existing label
 
   const findPoint = (id) => model.points.find((p) => p.id === id) || null;
   const findLine = (id) => model.lines.find((l) => l.id === id) || null;
+  const findLabel = (id) => model.labels.find((l) => l.id === id) || null;
+  const labelText = (vx, vy) => `(${fmtDisp(vx)}, ${fmtDisp(vy)})`;
 
   // ---------- read-out ----------
   const refreshReadout = () => {
@@ -366,9 +395,16 @@ export function buildGraphPlane(model, options = {}) {
       text = 'הקש על שתי נקודות ליצירת קו'; hint = true;
     } else if (mode === 'segment') {
       text = 'הקש על שתי נקודות ליצירת קטע'; hint = true;
+    } else if (mode === 'coord' && !coordOpen) {
+      text = 'הקש על הרשת במקום שבו תרצה את התווית'; hint = true;
+    } else if (mode === 'coord' && coordOpen) {
+      text = 'מלא את השיעורים ואשר'; hint = true;
     } else if (selection && selection.type === 'point') {
       const p = findPoint(selection.id);
       if (p) text = `(${fmt(p.x)}, ${fmt(p.y)})`;
+    } else if (selection && selection.type === 'label') {
+      const l = findLabel(selection.id);
+      if (l) text = labelText(l.vx, l.vy);
     } else if (selection && selection.type === 'line') {
       const l = findLine(selection.id);
       if (l) text = l.kind === 'segment' ? 'קטע' : formatEquation(l);
@@ -387,6 +423,9 @@ export function buildGraphPlane(model, options = {}) {
     if (selection.type === 'point') {
       const p = findPoint(selection.id);
       if (p) { anchor = mathToPx(view, p.x, p.y); label = 'מחק נקודה'; }
+    } else if (selection.type === 'label') {
+      const l = findLabel(selection.id);
+      if (l) { anchor = mathToPx(view, l.x, l.y); label = 'מחק תווית'; }
     } else {
       const l = findLine(selection.id);
       if (l) {
@@ -461,8 +500,44 @@ export function buildGraphPlane(model, options = {}) {
     });
   };
 
+  // Coordinate labels: bold ink text with a white halo (paint-order) so the
+  // "(3, 4)" stays readable over gridlines, lines and the worksheet behind an
+  // on-worksheet graph. Offset up-right from the anchor so the label sits
+  // beside a lattice point instead of covering it.
+  const drawCoordLabels = () => {
+    gCoordLabels.textContent = '';
+    for (const l of model.labels) {
+      const p = mathToPx(view, l.x, l.y);
+      const isSel = selection && selection.type === 'label' && selection.id === l.id;
+      const t = svgEl('text', {
+        x: p.px + 7, y: p.py - 7,
+        fill: isSel ? COLOR_POINT_SEL : COLOR_AXIS,
+        'font-size': 13, 'font-weight': 700,
+        stroke: '#fff', 'stroke-width': 3, 'paint-order': 'stroke'
+      });
+      t.textContent = labelText(l.vx, l.vy);
+      t.style.pointerEvents = 'none';
+      gCoordLabels.appendChild(t);
+    }
+  };
+
   const drawGhost = () => {
     gGhost.textContent = '';
+    if (mode === 'coord' && coordOpen && coordDraft.anchor) {
+      // Live preview of the label being edited, at its placement spot.
+      const p = mathToPx(view, coordDraft.anchor.x, coordDraft.anchor.y);
+      gGhost.appendChild(svgEl('circle', {
+        cx: p.px, cy: p.py, r: 4,
+        fill: 'none', stroke: COLOR_PREVIEW, 'stroke-width': 2, 'stroke-dasharray': '3 2'
+      }));
+      const t = svgEl('text', {
+        x: p.px + 7, y: p.py - 7,
+        fill: COLOR_PREVIEW, 'font-size': 13, 'font-weight': 700,
+        stroke: '#fff', 'stroke-width': 3, 'paint-order': 'stroke'
+      });
+      t.textContent = labelText(coordDraft.vx, coordDraft.vy);
+      gGhost.appendChild(t);
+    }
     if (pending) {
       const p = mathToPx(view, pending.x, pending.y);
       gGhost.appendChild(svgEl('circle', { cx: p.px, cy: p.py, r: 6, fill: 'none', stroke: COLOR_POINT, 'stroke-width': 2, 'stroke-dasharray': '3 2' }));
@@ -482,6 +557,7 @@ export function buildGraphPlane(model, options = {}) {
   const redraw = () => {
     drawLines();
     drawPoints();
+    drawCoordLabels();
     drawGhost();
     positionDelSel();
     refreshReadout();
@@ -490,6 +566,7 @@ export function buildGraphPlane(model, options = {}) {
   // ---------- selection ----------
   const selectPoint = (id) => { selection = { type: 'point', id }; redraw(); };
   const selectLine = (id) => { selection = { type: 'line', id }; redraw(); };
+  const selectLabel = (id) => { selection = { type: 'label', id }; redraw(); };
 
   // ---------- mode / tools ----------
   const updateToolButtons = () => {
@@ -502,6 +579,8 @@ export function buildGraphPlane(model, options = {}) {
   const setMode = (m) => {
     mode = m;
     pending = null;
+    // Leaving coord mode abandons any unconfirmed label draft.
+    if (m !== 'coord' && coordOpen) closeCoordPanel();
     redraw();
     updateToolButtons();
   };
@@ -509,6 +588,7 @@ export function buildGraphPlane(model, options = {}) {
   tPoint.addEventListener('click', () => setMode('point'));
   if (tLine) tLine.addEventListener('click', () => setMode('line'));
   tSeg.addEventListener('click', () => setMode('segment'));
+  tCoord.addEventListener('click', () => setMode(mode === 'coord' ? 'point' : 'coord'));
 
   // ---------- y=mx+b panel ----------
   let mValEl = null;
@@ -626,6 +706,123 @@ export function buildGraphPlane(model, options = {}) {
     });
   }
 
+  // ---------- coordinate-label panel ----------
+  // Same stepper interaction as the y=mx+b panel the kid already knows:
+  // the "( , )" structure is preloaded — he places it with a tap, then
+  // steps the x and y values and confirms. Steppers move by snapStep
+  // (whole units by default) between the view bounds.
+  let coordPreviewEl = null;
+  let coordAddBtn = null;
+
+  const refreshCoordPanel = () => {
+    if (coordPreviewEl) coordPreviewEl.textContent = labelText(coordDraft.vx, coordDraft.vy);
+    if (coordAddBtn) coordAddBtn.textContent = coordEditId ? 'עדכון' : 'אישור';
+    drawGhost();
+  };
+
+  const buildCoordPanel = () => {
+    coordPanel.textContent = '';
+    const preview = document.createElement('div');
+    preview.className = 'graphblock__fn-preview';
+    coordPreviewEl = preview;
+
+    const mkValStepper = (caption, get, set, lo, hi) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'graphblock__fn-stepper';
+      const cap = document.createElement('span');
+      cap.className = 'graphblock__fn-cap';
+      cap.textContent = caption;
+      const minus = document.createElement('button');
+      minus.type = 'button';
+      minus.className = 'graphblock__fn-btn';
+      minus.textContent = MINUS;
+      minus.setAttribute('aria-label', `הקטנה ${caption}`);
+      const val = document.createElement('span');
+      val.className = 'graphblock__fn-val';
+      const plus = document.createElement('button');
+      plus.type = 'button';
+      plus.className = 'graphblock__fn-btn';
+      plus.textContent = '+';
+      plus.setAttribute('aria-label', `הגדלה ${caption}`);
+      const paint = () => { val.textContent = fmtDisp(get()); };
+      minus.addEventListener('click', () => {
+        set(clamp(get() - snapStep, lo, hi));
+        paint(); refreshCoordPanel();
+      });
+      plus.addEventListener('click', () => {
+        set(clamp(get() + snapStep, lo, hi));
+        paint(); refreshCoordPanel();
+      });
+      paint();
+      wrap.append(cap, minus, val, plus);
+      return wrap;
+    };
+
+    const xS = mkValStepper('x', () => coordDraft.vx, (v) => { coordDraft.vx = v; }, view.xMin, view.xMax);
+    const yS = mkValStepper('y', () => coordDraft.vy, (v) => { coordDraft.vy = v; }, view.yMin, view.yMax);
+
+    const actions = document.createElement('div');
+    actions.className = 'graphblock__fn-actions';
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'graphblock__fn-add';
+    coordAddBtn = addBtn;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'graphblock__fn-cancel';
+    cancelBtn.textContent = 'ביטול';
+    addBtn.addEventListener('click', () => {
+      if (!coordDraft.anchor && !coordEditId) return;
+      onEditStart();
+      if (coordEditId) {
+        const l = findLabel(coordEditId);
+        if (l) { l.vx = coordDraft.vx; l.vy = coordDraft.vy; }
+      } else {
+        model.labels.push({
+          id: graphPointId(),
+          x: coordDraft.anchor.x,
+          y: coordDraft.anchor.y,
+          vx: coordDraft.vx,
+          vy: coordDraft.vy
+        });
+      }
+      closeCoordPanel();
+      redraw();
+      onChange();
+    });
+    cancelBtn.addEventListener('click', () => { closeCoordPanel(); redraw(); });
+    actions.append(addBtn, cancelBtn);
+
+    coordPanel.append(preview, xS, yS, actions);
+    refreshCoordPanel();
+  };
+
+  const openCoordPanel = ({ anchor = null, editId = null } = {}) => {
+    if (editId) {
+      const l = findLabel(editId);
+      coordDraft = l
+        ? { anchor: { x: l.x, y: l.y }, vx: l.vx, vy: l.vy }
+        : { anchor, vx: 0, vy: 0 };
+      coordEditId = l ? editId : null;
+    } else {
+      coordDraft = { anchor, vx: 0, vy: 0 };
+      coordEditId = null;
+    }
+    coordOpen = true;
+    coordPanel.hidden = false;
+    buildCoordPanel();
+    refreshReadout();
+    drawGhost();
+  };
+
+  function closeCoordPanel() {
+    coordOpen = false;
+    coordEditId = null;
+    coordDraft = { anchor: null, vx: 0, vy: 0 };
+    coordPanel.hidden = true;
+    coordPanel.textContent = '';
+  }
+
   // ---------- canvas pointer handling ----------
   const clientToMath = (clientX, clientY) => {
     const ctm = svg.getScreenCTM();
@@ -660,6 +857,16 @@ export function buildGraphPlane(model, options = {}) {
     return best;
   };
 
+  const nearestLabel = (mx, my) => {
+    let best = null;
+    let bestD = HIT_RADIUS;
+    for (const l of model.labels) {
+      const d = Math.hypot(l.x - mx, l.y - my);
+      if (d <= bestD) { bestD = d; best = l; }
+    }
+    return best;
+  };
+
   const snapM = (m) => ({
     x: clamp(snap(m.x, snapStep), view.xMin, view.xMax),
     y: clamp(snap(m.y, snapStep), view.yMin, view.yMax)
@@ -671,6 +878,27 @@ export function buildGraphPlane(model, options = {}) {
     const m = clientToMath(e.clientX, e.clientY);
     if (!m) return;
     e.preventDefault();
+
+    if (mode === 'coord') {
+      // Tap an existing label to edit it; tap anywhere else to (re)place
+      // the draft label's anchor — re-tapping before confirming just moves
+      // it, so "decide where to place it" stays cheap to change.
+      const labelHit = nearestLabel(m.x, m.y);
+      if (labelHit) {
+        selectLabel(labelHit.id);
+        openCoordPanel({ editId: labelHit.id });
+        return;
+      }
+      const anchor = snapM(m);
+      if (coordOpen && !coordEditId) {
+        coordDraft.anchor = anchor;
+        refreshReadout();
+        drawGhost();
+      } else {
+        openCoordPanel({ anchor });
+      }
+      return;
+    }
 
     if (mode === 'line' || mode === 'segment') {
       const s = snapM(m);
@@ -700,6 +928,14 @@ export function buildGraphPlane(model, options = {}) {
       active = { id: hit.id, undoPushed: false };
       selectPoint(hit.id);
       try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
+    // Labels are selectable in point mode too (to delete or re-edit one
+    // without hunting for the (x,y) tool) — but AFTER the point hit-test,
+    // so a label sitting next to its point never steals the point's tap.
+    const labelHit = nearestLabel(m.x, m.y);
+    if (labelHit) {
+      selectLabel(labelHit.id);
       return;
     }
     const lineHit = nearestLine(m.x, m.y);
@@ -747,6 +983,9 @@ export function buildGraphPlane(model, options = {}) {
     onEditStart();
     if (selection.type === 'point') {
       model.points = model.points.filter((p) => p.id !== selection.id);
+    } else if (selection.type === 'label') {
+      model.labels = model.labels.filter((l) => l.id !== selection.id);
+      if (coordEditId === selection.id) closeCoordPanel();
     } else {
       model.lines = model.lines.filter((l) => l.id !== selection.id);
     }
@@ -757,12 +996,15 @@ export function buildGraphPlane(model, options = {}) {
 
   clearBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
   clearBtn.addEventListener('click', () => {
-    if (model.points.length === 0 && model.lines.length === 0) return;
+    if (model.points.length === 0 && model.lines.length === 0 &&
+        model.labels.length === 0) return;
     onEditStart();
     model.points = [];
     model.lines = [];
+    model.labels = [];
     selection = null;
     pending = null;
+    if (coordOpen) closeCoordPanel();
     redraw();
     onChange();
   });
