@@ -221,9 +221,9 @@ export function buildGraphPlane(model, options = {}) {
   // no new line/function can be created. Order preserved (point, line,
   // segment, fn) when both are shown.
   const advancedTools = isGraphAdvancedToolsEnabled();
-  const tPoint = mkTool('נקודה', 'point', 'הקישי על הרשת להוספת נקודה');
-  const tSeg = mkTool('קטע', 'segment', 'הקישי על שתי נקודות ליצירת קטע');
-  const tLine = advancedTools ? mkTool('קו', 'line', 'הקישי על שתי נקודות ליצירת קו ישר') : null;
+  const tPoint = mkTool('נקודה', 'point', 'הקש על הרשת להוספת נקודה');
+  const tSeg = mkTool('קטע', 'segment', 'הקש על שתי נקודות ליצירת קטע');
+  const tLine = advancedTools ? mkTool('קו', 'line', 'הקש על שתי נקודות ליצירת קו ישר') : null;
   const tFn = advancedTools ? mkTool('y=mx+b', 'fn', 'הוספת פונקציה לפי שיפוע וחיתוך') : null;
   tools.append(tPoint);
   if (tLine) tools.append(tLine);
@@ -361,11 +361,11 @@ export function buildGraphPlane(model, options = {}) {
     let text = '';
     let hint = false;
     if (pending) {
-      text = 'הקישי על הנקודה השנייה'; hint = true;
+      text = 'הקש על הנקודה השנייה'; hint = true;
     } else if (mode === 'line') {
-      text = 'הקישי על שתי נקודות ליצירת קו'; hint = true;
+      text = 'הקש על שתי נקודות ליצירת קו'; hint = true;
     } else if (mode === 'segment') {
-      text = 'הקישי על שתי נקודות ליצירת קטע'; hint = true;
+      text = 'הקש על שתי נקודות ליצירת קטע'; hint = true;
     } else if (selection && selection.type === 'point') {
       const p = findPoint(selection.id);
       if (p) text = `(${fmt(p.x)}, ${fmt(p.y)})`;
@@ -373,7 +373,7 @@ export function buildGraphPlane(model, options = {}) {
       const l = findLine(selection.id);
       if (l) text = l.kind === 'segment' ? 'קטע' : formatEquation(l);
     } else {
-      text = 'הקישי על הרשת כדי להוסיף נקודה'; hint = true;
+      text = 'הקש על הרשת כדי להוסיף נקודה'; hint = true;
     }
     readout.textContent = text;
     readout.classList.toggle('graphblock__readout--hint', hint);

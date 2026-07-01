@@ -118,7 +118,7 @@ async function init() {
     console.error('Initial render failed:', err);
     await confirmDialog({
       title: 'תקלה בטעינה',
-      body: 'לא הצלחנו לטעון את המחברות. נסי לרענן את הדף.',
+      body: 'לא הצלחנו לטעון את המחברות. נסה לרענן את הדף.',
       confirmLabel: 'אישור',
       cancelLabel: 'סגירה'
     });
@@ -191,7 +191,7 @@ async function renderHome() {
       const count = (await listNotebooks()).length;
       const name = await promptDialog({
         title: 'מחברת חדשה',
-        body: 'בחרי שם למחברת:',
+        body: 'בחר שם למחברת:',
         defaultValue: `מחברת ${count + 1}`,
         confirmLabel: 'יצירה'
       });
@@ -203,7 +203,7 @@ async function renderHome() {
       // Without this surface the click silently fails on the kid (notably
       // when IDB rejects the create transaction). A Hebrew toast at least
       // tells her something actually went wrong.
-      toast('יצירת המחברת נכשלה — נסי שוב.', { kind: 'error', duration: 3600 });
+      toast('יצירת המחברת נכשלה — נסה שוב.', { kind: 'error', duration: 3600 });
     }
   });
 
@@ -212,7 +212,7 @@ async function renderHome() {
       const count = (await listFolders()).length;
       const name = await promptDialog({
         title: 'תיקייה חדשה',
-        body: 'בחרי שם לתיקייה:',
+        body: 'בחר שם לתיקייה:',
         defaultValue: `תיקייה ${count + 1}`,
         confirmLabel: 'יצירה'
       });
@@ -222,7 +222,7 @@ async function renderHome() {
       await render();
     } catch (err) {
       console.error('Create folder failed:', err);
-      toast('יצירת התיקייה נכשלה — נסי שוב.', { kind: 'error', duration: 3600 });
+      toast('יצירת התיקייה נכשלה — נסה שוב.', { kind: 'error', duration: 3600 });
     }
   });
 
@@ -267,7 +267,7 @@ async function renderHome() {
         console.error('Backup-all failed:', err);
         await confirmDialog({
           title: 'הגיבוי נכשל',
-          body: err.message || 'נסי שוב מאוחר יותר.',
+          body: err.message || 'נסה שוב מאוחר יותר.',
           confirmLabel: 'אישור',
           cancelLabel: 'סגירה'
         });
@@ -393,7 +393,7 @@ function wireFolderHandlers(folderHost) {
       if (!folder) return;
       const name = await promptDialog({
         title: 'שינוי שם תיקייה',
-        body: 'בחרי שם חדש לתיקייה:',
+        body: 'בחר שם חדש לתיקייה:',
         defaultValue: folder.name || '',
         confirmLabel: 'שמירה'
       });
@@ -422,7 +422,7 @@ function wireFolderDeleteLongPress(btn) {
     const ok = await confirmDialog({
       title: 'מחיקת תיקייה',
       body: `למחוק את התיקייה "${folder.name}"? המחברות שבתוכה יחזרו למסך הראשי.`,
-      confirmLabel: 'מחקי תיקייה',
+      confirmLabel: 'מחק תיקייה',
       cancelLabel: 'ביטול',
       destructive: true
     });
@@ -509,7 +509,7 @@ function wireDeleteLongPress(btn) {
     const ok = await confirmDialog({
       title: 'העברה לנמחקו לאחרונה',
       body: `להעביר את "${nb.name}" לסל "נמחקו לאחרונה"? אפשר לשחזר אותה תוך 30 יום.`,
-      confirmLabel: 'העבירי לסל',
+      confirmLabel: 'העבר לסל',
       cancelLabel: 'ביטול'
     });
     if (!ok) return;
@@ -573,14 +573,14 @@ async function renderFolder(folderId) {
       window.location.hash = `#/notebook/${nb.id}`;
     } catch (err) {
       console.error('Create notebook in folder failed:', err);
-      toast('יצירת המחברת נכשלה — נסי שוב.', { kind: 'error', duration: 3600 });
+      toast('יצירת המחברת נכשלה — נסה שוב.', { kind: 'error', duration: 3600 });
     }
   });
 
   document.getElementById('rename-folder').addEventListener('click', async () => {
     const name = await promptDialog({
       title: 'שינוי שם תיקייה',
-      body: 'בחרי שם חדש לתיקייה:',
+      body: 'בחר שם חדש לתיקייה:',
       defaultValue: folder.name || '',
       confirmLabel: 'שמירה'
     });
@@ -630,7 +630,7 @@ async function renderTrash() {
       const ok = await confirmDialog({
         title: 'ריקון הסל',
         body: `למחוק לצמיתות את כל ${entries.length} המחברות בסל? אי אפשר לשחזר אחרי הפעולה הזו.`,
-        confirmLabel: 'כן, מחקי הכל',
+        confirmLabel: 'כן, מחק הכל',
         cancelLabel: 'ביטול',
         destructive: true
       });
@@ -641,7 +641,7 @@ async function renderTrash() {
         await renderTrash();
       } catch (err) {
         console.error('Empty trash failed:', err);
-        toast('ריקון הסל נכשל — נסי שוב.', { kind: 'error', duration: 3600 });
+        toast('ריקון הסל נכשל — נסה שוב.', { kind: 'error', duration: 3600 });
       }
     });
   }
@@ -694,7 +694,7 @@ function wireTrashHandlers(listHost) {
         await renderTrash();
       } catch (err) {
         console.error('Restore from trash failed:', err);
-        toast('שחזור נכשל — נסי שוב.', { kind: 'error', duration: 3600 });
+        toast('שחזור נכשל — נסה שוב.', { kind: 'error', duration: 3600 });
       }
     });
   }
@@ -716,7 +716,7 @@ function wirePurgeLongPress(btn) {
     const ok = await confirmDialog({
       title: 'מחיקה לצמיתות',
       body: 'למחוק את המחברת לתמיד? אי אפשר לשחזר אחרי הפעולה הזו.',
-      confirmLabel: 'כן, מחקי לתמיד',
+      confirmLabel: 'כן, מחק לתמיד',
       cancelLabel: 'ביטול',
       destructive: true
     });

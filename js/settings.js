@@ -3,8 +3,9 @@
 //
 //   • graphAdvancedTools — show the line (קו) and function (y=mx+b) tools in
 //     every coordinate plane (standalone graph block AND on-worksheet graph).
-//     Default OFF: a kid just plotting points / segments isn't shown the more
-//     advanced line tools until someone enables them.
+//     Default ON: linear functions (y=mx+b) are core 8th-grade material, so
+//     the tools are visible out of the box; a grown-up can hide them from
+//     the home-screen settings if they're distracting.
 //   • splitMode — open notebooks with the worksheet beside the work area
 //     (split screen) instead of stacked. Shared with the in-editor split
 //     toggle, which writes the same key.
@@ -28,7 +29,7 @@ function setBool(key, value) {
 }
 
 export function isGraphAdvancedToolsEnabled() {
-  return getBool(KEYS.graphAdvancedTools, false);
+  return getBool(KEYS.graphAdvancedTools, true);
 }
 export function setGraphAdvancedToolsEnabled(value) {
   setBool(KEYS.graphAdvancedTools, value);

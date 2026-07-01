@@ -2090,28 +2090,8 @@ h1 {
   justify-content: center;
   padding: 0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  /* Required for the longpress-fill ::before to be clipped to the
-     button's circular bounds. */
-  overflow: hidden;
 }
 .workblock__delete:active { background: rgba(192, 57, 43, 0.85); }
-/* Long-press progress fill — visual feedback during the 700ms hold so
-   the kid sees the action is loading. Same idea as
-   .notebook-card__delete .longpress-fill but tinted red since this
-   button is already on a dark background. */
-.workblock__delete .longpress-fill {
-  position: absolute;
-  inset: 0;
-  background: rgba(192, 57, 43, 0.55);
-  transform: scaleX(0);
-  transform-origin: center;
-  pointer-events: none;
-  border-radius: 50%;
-}
-.workblock__delete--arming .longpress-fill {
-  transform: scaleX(1);
-  transition: transform 700ms linear;
-}
 
 /* --- Work block resize handle --- */
 /* Sits at the bottom-right of the work block. Drag down/right to grow,
@@ -2593,11 +2573,14 @@ h1 {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 700;
   line-height: 1;
-  width: 22px;
-  height: 36px;
+  /* 36×44 — close to the 44pt HIG target so the tap-to-reorder arrows
+     are actually usable with reduced fine-motor control (they were
+     22×36, the smallest interactive targets in the app). */
+  width: 36px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2756,8 +2739,34 @@ h1 {
      in manipulate mode), so it must be hidden here or it prints as a stray
      blue dot at the corner of every on-worksheet graph. */
   .gridannot__menu,
-  .worksheet__annot-resize {
+  .worksheet__annot-resize,
+  /* The whole collapsible chrome (topbar, actions, and its pin/close
+     buttons). The individual topbar/actions rules above predate the
+     collapsible chrome; without this the 📌 pin and × close buttons
+     printed as stray icons in the page's top corner. */
+  .editor__chrome,
+  /* Graph interaction chrome — tool buttons (נקודה/קו/קטע/y=mx+b),
+     the נקה clear button, the coordinate readout / tap hints, the
+     y=mx+b editor panel, and the tap-a-point delete bubble. These are
+     input affordances, not content; they were printing on top of the
+     plotted plane (worst on on-worksheet graphs, where the toolbar
+     covered the worksheet text). The plane, points, segments and
+     function lines still print — they're in .graphblock__plot. */
+  .graphplane__bar,
+  .graphblock__tools,
+  .graphblock__clear,
+  .graphblock__readout,
+  .graphblock__fn,
+  .graphblock__del-point,
+  .graphblock__delete {
     display: none !important;
+  }
+  /* The active-cell cursor is an editing indicator, not content — the
+     blue filled box was printing into the middle of the kid's homework. */
+  .cell--cursor,
+  .gridannot__cell--cursor {
+    background: transparent !important;
+    box-shadow: none !important;
   }
   .editor--full {
     padding: 0;
@@ -2786,6 +2795,14 @@ h1 {
   }
   .grid {
     border-color: #999 !important;
+    /* On-screen --cell-size is derived from 100vw, but in a print pass
+       viewport units still reflect the SCREEN viewport, not the paper —
+       an iPad-width grid overflowed the narrower A4/letter page and the
+       RTL layout clipped it off the LEFT edge, cutting the beginning of
+       every calculation. Physical units resolve correctly in print:
+       7.2in of usable width fits both A4 (8.27in) and letter (8.5in)
+       with margins to spare. */
+    --cell-size: min(56px, calc(7.2in / var(--cols))) !important;
   }
   .cell {
     border-right-color: #bbb !important;

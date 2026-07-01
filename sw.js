@@ -1,4 +1,4 @@
-const CACHE = 'mathapp-shell-v67';
+const CACHE = 'mathapp-shell-v69';
 const SHELL = [
   './',
   './index.html',
@@ -27,6 +27,8 @@ const SHELL = [
   // Precaching the worker too so PDF import works fully offline.
   './vendor/pdf.min.mjs',
   './vendor/pdf.worker.min.mjs',
+  './vendor/map-polyfill.mjs',
+  './vendor/pdf.worker.shim.mjs',
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',

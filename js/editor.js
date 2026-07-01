@@ -164,7 +164,7 @@ export async function mountEditor(root, notebookId) {
       } else if (block.type === BLOCK.WORKSHEET && Array.isArray(block.annotations)) {
         // Prune annotations that were created (often by stray taps in
         // annotate mode) but never typed into. Pre-cleanup notebooks
-        // accumulated visible "הקלידי…" placeholders all over the
+        // accumulated visible "הקלד…" placeholders all over the
         // worksheet because empty annotations persisted across saves.
         // Future empties auto-delete on blur via worksheet.js; this
         // catches the legacy ones. Grid annotations are kept regardless
@@ -311,9 +311,9 @@ export async function mountEditor(root, notebookId) {
           <button class="btn btn--ghost" id="undo-edit" aria-label="ביטול פעולה" title="ביטול פעולה אחרונה" disabled>↺ <span class="label">ביטול</span></button>
           <span class="editor__sep"></span>
           <button class="btn btn--ghost" id="upload-library" aria-label="צילום או בחירת קובץ" title="צילום, תמונה או PDF">📷 <span class="label">דף</span></button>
-          <button class="btn btn--ghost" id="toggle-annotate-grid" aria-label="חישוב על דף" title="חישוב על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת חישוב">🔢 <span class="label">חישוב על דף</span></button>
-          <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — הקישי כאן ואז על הדף כדי להוסיף תיבת טקסט">📝 <span class="label">טקסט על דף</span></button>
-          <button class="btn btn--ghost" id="toggle-annotate-graph" aria-label="גרף על דף" title="גרף על דף — הקישי כאן ואז על דף שהעלית כדי להוסיף מערכת צירים">📐 <span class="label">גרף על דף</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-grid" aria-label="חישוב על דף" title="חישוב על דף — הקש כאן ואז על הדף כדי להוסיף תיבת חישוב">🔢 <span class="label">חישוב על דף</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-text" aria-label="טקסט על דף" title="טקסט על דף — הקש כאן ואז על הדף כדי להוסיף תיבת טקסט">📝 <span class="label">טקסט על דף</span></button>
+          <button class="btn btn--ghost" id="toggle-annotate-graph" aria-label="גרף על דף" title="גרף על דף — הקש כאן ואז על דף שהעלית כדי להוסיף מערכת צירים">📐 <span class="label">גרף על דף</span></button>
           <button class="btn btn--ghost" id="add-work" aria-label="תרגיל חדש">➕ <span class="label">תרגיל חדש</span></button>
           <button class="btn btn--ghost" id="add-graph" aria-label="גרף" title="הוספת מערכת צירים — לסימון נקודות (x, y)">📈 <span class="label">גרף</span></button>
           <button class="btn btn--ghost" id="toggle-split" aria-label="פיצול">🔀 <span class="label">פיצול</span></button>
@@ -436,10 +436,10 @@ export async function mountEditor(root, notebookId) {
     if (kind) {
       toast(
         kind === 'grid'
-          ? 'הקישי על הדף במקום שבו תרצי את תיבת החישוב'
+          ? 'הקש על הדף במקום שבו תרצה את תיבת החישוב'
           : kind === 'graph'
-            ? 'הקישי על הדף במקום שבו תרצי את מערכת הצירים'
-            : 'הקישי על הדף במקום שבו תרצי את תיבת הטקסט',
+            ? 'הקש על הדף במקום שבו תרצה את מערכת הצירים'
+            : 'הקש על הדף במקום שבו תרצה את תיבת הטקסט',
         { kind: 'info' }
       );
     }
@@ -469,7 +469,7 @@ export async function mountEditor(root, notebookId) {
     if (annotateKind !== 'graph') {
       const hasWorksheet = page.blocks.some((b) => b.type === BLOCK.WORKSHEET);
       if (!hasWorksheet) {
-        toast('כדי להוסיף גרף על דף צריך קודם להעלות דף (📷 דף). להוספת גרף עצמאי השתמשי בכפתור 📈 גרף.', { kind: 'warn', duration: 4000 });
+        toast('כדי להוסיף גרף על דף צריך קודם להעלות דף (📷 דף). להוספת גרף עצמאי השתמש בכפתור 📈 גרף.', { kind: 'warn', duration: 4000 });
         return;
       }
     }
@@ -548,6 +548,10 @@ export async function mountEditor(root, notebookId) {
   let pdfPrintSplitWasOn = false;
   function injectPrintSnapshot() {
     if (!canvas) return;
+    // Defensive: a second beforeprint without an afterprint in between
+    // (some engines fire the pair per print-preview pass) must not leak
+    // an orphaned snapshot <img> into the page.
+    removePrintSnapshot();
     try {
       const dataUrl = canvas.toDataURL('image/png');
       printSnapshotImg = document.createElement('img');
@@ -641,7 +645,7 @@ export async function mountEditor(root, notebookId) {
       console.error('Single-notebook backup failed:', err);
       await confirmDialog({
         title: 'הגיבוי נכשל',
-        body: 'נסי שוב מאוחר יותר.',
+        body: 'נסה שוב מאוחר יותר.',
         confirmLabel: 'אישור',
         cancelLabel: 'סגירה'
       });
@@ -1214,8 +1218,8 @@ export async function mountEditor(root, notebookId) {
     upBtn.type = 'button';
     upBtn.className = 'block__handle-arrow';
     upBtn.textContent = '▲';
-    upBtn.title = 'הזיזי למעלה';
-    upBtn.setAttribute('aria-label', 'הזיזי למעלה');
+    upBtn.title = 'הזז למעלה';
+    upBtn.setAttribute('aria-label', 'הזז למעלה');
 
     const dots = document.createElement('span');
     dots.className = 'block__handle-dots';
@@ -1227,8 +1231,8 @@ export async function mountEditor(root, notebookId) {
     downBtn.type = 'button';
     downBtn.className = 'block__handle-arrow';
     downBtn.textContent = '▼';
-    downBtn.title = 'הזיזי למטה';
-    downBtn.setAttribute('aria-label', 'הזיזי למטה');
+    downBtn.title = 'הזז למטה';
+    downBtn.setAttribute('aria-label', 'הזז למטה');
 
     const refreshDisabled = () => {
       upBtn.disabled = !canMoveUp();
@@ -1649,6 +1653,49 @@ export async function mountEditor(root, notebookId) {
       const prev = wbs.length ? wbs[wbs.length - 1].label : '';
       return nextExerciseLabel(prev) || String(wbs.length + 1);
     };
+
+    // Multi-page PDF into a pristine notebook: consume the pre-seeded
+    // blank exercises instead of stacking them all under page 1. A fresh
+    // notebook seeds five empty work blocks (great for typing without any
+    // upload, and for a single photographed sheet with several questions)
+    // — but with a multi-page PDF that layout left five empty grids in
+    // section 1 while pages 2+ got new blocks labeled 6, 7, …. Here each
+    // PDF page pairs with one of the existing empty blocks (so labels run
+    // 1, 2, … matching the pages) and leftover empties are dropped — the
+    // kid adds more work areas per page with ➕ תרגיל חדש as needed.
+    // "Pristine" is strict: no worksheet/graph blocks, nothing typed, no
+    // row labels, no pencil strokes — so this can never discard work.
+    if (!hasExistingWorksheet && newWs.length > 1) {
+      const workBlocks = page.blocks.filter((b) => b.type === BLOCK.WORK);
+      const isEmptyWb = (b) =>
+        (!b.cells || Object.keys(b.cells).length === 0) &&
+        (!b.rowLabels || Object.keys(b.rowLabels).length === 0);
+      const pristine =
+        workBlocks.length > 0 &&
+        page.blocks.every((b) => b.type === BLOCK.WORK) &&
+        workBlocks.every(isEmptyWb) &&
+        strokes.length === 0;
+      if (pristine) {
+        const paired = [];
+        let prevLabel = '';
+        newWs.forEach((ws, i) => {
+          paired.push(ws);
+          const wb = workBlocks[i] ||
+            newWorkBlock({ label: nextExerciseLabel(prevLabel) || String(i + 1) });
+          paired.push(wb);
+          prevLabel = wb.label;
+        });
+        page.blocks = paired;
+        activeSectionIndex = 0;
+        activeWorkBlock = workBlocks[0];
+        cursor.r = 0;
+        cursor.c = MARGIN_COLS;
+        cursor.slot = null;
+        await savePage(page);
+        await renderBlocks();
+        return;
+      }
+    }
 
     if (!hasExistingWorksheet) {
       // First worksheet on the page — insert it ahead of the implicit
@@ -2221,7 +2268,7 @@ export async function mountEditor(root, notebookId) {
     const ok = await confirmDialog({
       title: 'מחיקת ציורים',
       body: 'למחוק את כל הציורים בדף הזה?',
-      confirmLabel: 'מחקי הכל',
+      confirmLabel: 'מחק הכל',
       cancelLabel: 'ביטול',
       destructive: true
     });
@@ -2803,7 +2850,7 @@ export async function mountEditor(root, notebookId) {
       hint.type = 'button';
       hint.className = 'workblock__row-label-editor-hint';
       hint.textContent = `↓ ${suggestion}`;
-      hint.setAttribute('aria-label', `הוסיפי תווית ${suggestion}`);
+      hint.setAttribute('aria-label', `הוסף תווית ${suggestion}`);
       hint.addEventListener('mousedown', (e) => e.preventDefault());
       hint.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -3409,7 +3456,7 @@ export async function mountEditor(root, notebookId) {
     const now = Date.now();
     if (now - lastFractionEdgeToastAt < 5000) return;
     lastFractionEdgeToastAt = now;
-    toast('השבר ארוך מדי לשורה — נסי מספרים קצרים יותר או הוסיפי אזור פתרון חדש.', {
+    toast('השבר ארוך מדי לשורה — נסה מספרים קצרים יותר או הוסף אזור פתרון חדש.', {
       kind: 'warn',
       duration: 3600
     });
@@ -3425,7 +3472,7 @@ export async function mountEditor(root, notebookId) {
     const now = Date.now();
     if (now - lastAtomEdgeToastAt < 5000) return;
     lastAtomEdgeToastAt = now;
-    toast('הגעת לסוף השורה — גררי את הפינה ⤡ כדי להרחיב, או עברי לשורה הבאה.', {
+    toast('הגעת לסוף השורה — גרור את הפינה ⤡ כדי להרחיב, או עבור לשורה הבאה.', {
       kind: 'warn',
       duration: 3600
     });
