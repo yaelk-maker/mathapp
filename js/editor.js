@@ -548,6 +548,10 @@ export async function mountEditor(root, notebookId) {
   let pdfPrintSplitWasOn = false;
   function injectPrintSnapshot() {
     if (!canvas) return;
+    // Defensive: a second beforeprint without an afterprint in between
+    // (some engines fire the pair per print-preview pass) must not leak
+    // an orphaned snapshot <img> into the page.
+    removePrintSnapshot();
     try {
       const dataUrl = canvas.toDataURL('image/png');
       printSnapshotImg = document.createElement('img');
