@@ -285,7 +285,7 @@ function bindAnnotationInteractions(el, annot, block, options) {
   // Tracks "has the kid actually put any text in this annotation". An
   // annotation that's only ever been created (a stray tap) and never typed
   // into is cleaned up on blur so the worksheet doesn't accumulate ghost
-  // "הקלידי…" placeholders all over the page. Once any character lands,
+  // "הקלד…" placeholders all over the page. Once any character lands,
   // even briefly, the annotation is considered intentional and survives a
   // later empty-blur.
   let everTyped = (annot.text || '').length > 0;
@@ -317,7 +317,7 @@ function bindAnnotationInteractions(el, annot, block, options) {
     manipulateBadge.type = 'button';
     manipulateBadge.className = 'worksheet__annot-manipulate-badge';
     manipulateBadge.textContent = '⋯';
-    manipulateBadge.title = 'הזיזי / שני גודל / מחקי';
+    manipulateBadge.title = 'הזז / שנה גודל / מחק';
     manipulateBadge.setAttribute('aria-label', 'אפשרויות (הזזה, שינוי גודל, מחיקה)');
     // Position the badge in the overlay using the annotation's stored
     // fractional coordinates. Top is the annotation's top minus an

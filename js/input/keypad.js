@@ -46,7 +46,7 @@ const KEYS = [
   // without changing the layout, so it sits where √ was. Square roots are
   // now written with the ⁿ√ key (index 2 + radicand) one column over.
   { code: '/', label: '/', kind: 'op', title: 'לוכסן' },
-  { code: 'NROOT', label: 'ⁿ√', kind: 'comp', title: 'שורש ריבועי (לשורש אחר: ↑ ושנו את המספר הקטן)' },
+  { code: 'NROOT', label: 'ⁿ√', kind: 'comp', title: 'שורש ריבועי (לשורש אחר: ↑ ושנה את המספר הקטן)' },
   { code: 'b', label: 'b', kind: 'var' },
   { code: '4', label: '4' },
   { code: '5', label: '5' },

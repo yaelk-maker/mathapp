@@ -132,7 +132,7 @@ async function renderPdfToBlocks(file) {
     pdfjs = await loadPdfJs();
   } catch (err) {
     console.error('pdf.js failed to load:', err);
-    toast('שגיאה בטעינת ספריית ה-PDF — נסי שוב.', { kind: 'error', duration: 4200 });
+    toast('שגיאה בטעינת ספריית ה-PDF — נסה שוב.', { kind: 'error', duration: 4200 });
     return [];
   }
   const buf = await file.arrayBuffer();
@@ -209,7 +209,7 @@ export async function uploadWorksheet({
   if (!picked) return null;
 
   if (isDocxFile(picked)) {
-    toast('מסמך וורד אינו נתמך — שמרי כ-PDF ונסי שוב.', {
+    toast('מסמך וורד אינו נתמך — שמור כ-PDF ונסה שוב.', {
       kind: 'error',
       duration: 5000
     });

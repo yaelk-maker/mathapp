@@ -221,60 +221,25 @@ export function renderWorkBlock(block, options = {}) {
     del.type = 'button';
     del.className = 'workblock__delete';
     del.textContent = '✕';
-    del.title = 'לחצי וחזיקי כדי להסיר אזור פתרון';
-    del.setAttribute('aria-label', 'הסר אזור פתרון (לחיצה ארוכה)');
+    del.title = 'הסרת אזור פתרון';
+    del.setAttribute('aria-label', 'הסר אזור פתרון');
     del.addEventListener('mousedown', (e) => e.preventDefault());
-    // Long-press gate. Unlike notebook/folder delete (a deliberate UI
-    // affordance the kid taps on purpose), this × sits ON TOP of the
-    // worksheet/grid area where the kid is typing and drawing — a
-    // tremor or accidental palm contact would otherwise sail straight
-    // into the confirm dialog. 700ms hold + visual fill matches the
-    // home-screen pattern the kid is already trained on.
-    wireWorkblockDeleteLongPress(del, () => onDelete(block.id));
+    // Tap → confirm dialog, matching every other delete affordance in the
+    // app. This was previously gated behind a 700ms press-and-hold, but a
+    // sustained hold is exactly the gesture that's hardest with reduced
+    // fine-motor control — and the home-screen deletes already dropped
+    // their long-press for that reason (accessibility audit). The confirm
+    // dialog (default focus on ביטול for destructive actions) is the
+    // safety net for a stray palm or tremor tap.
+    del.addEventListener('pointerdown', (e) => e.stopPropagation());
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onDelete(block.id);
+    });
     wrapper.appendChild(del);
   }
 
   return { wrapper, grid };
-}
-
-// 700ms press-and-hold before the confirm dialog fires. Matches the home-
-// screen notebook-delete cadence the kid is already trained on. Adds a
-// CSS class during the hold so the .longpress-fill span can animate a
-// progress arc into place.
-const WORKBLOCK_DELETE_LONGPRESS_MS = 700;
-function wireWorkblockDeleteLongPress(btn, onFire) {
-  let timer = null;
-  let triggered = false;
-  // Inject the longpress-fill span so the CSS arming animation has
-  // somewhere to paint into — same shape as the home-screen buttons.
-  if (!btn.querySelector('.longpress-fill')) {
-    const fill = document.createElement('span');
-    fill.className = 'longpress-fill';
-    btn.insertBefore(fill, btn.firstChild);
-  }
-  const cancel = () => {
-    if (timer) { clearTimeout(timer); timer = null; }
-    btn.classList.remove('workblock__delete--arming');
-  };
-  btn.addEventListener('pointerdown', (e) => {
-    e.stopPropagation();
-    triggered = false;
-    btn.classList.add('workblock__delete--arming');
-    timer = setTimeout(() => {
-      triggered = true;
-      btn.classList.remove('workblock__delete--arming');
-      onFire();
-    }, WORKBLOCK_DELETE_LONGPRESS_MS);
-  });
-  btn.addEventListener('pointerup', (e) => {
-    e.stopPropagation();
-    cancel();
-  });
-  btn.addEventListener('pointerleave', cancel);
-  btn.addEventListener('pointercancel', cancel);
-  // Suppress the synthetic click so a brush-by tap never reaches the
-  // confirm dialog (only the timer-fired path does).
-  btn.addEventListener('click', (e) => e.stopPropagation());
 }
 
 export function updateCell(grid, block, r, c, activeSlot = null) {

@@ -2090,28 +2090,8 @@ h1 {
   justify-content: center;
   padding: 0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  /* Required for the longpress-fill ::before to be clipped to the
-     button's circular bounds. */
-  overflow: hidden;
 }
 .workblock__delete:active { background: rgba(192, 57, 43, 0.85); }
-/* Long-press progress fill — visual feedback during the 700ms hold so
-   the kid sees the action is loading. Same idea as
-   .notebook-card__delete .longpress-fill but tinted red since this
-   button is already on a dark background. */
-.workblock__delete .longpress-fill {
-  position: absolute;
-  inset: 0;
-  background: rgba(192, 57, 43, 0.55);
-  transform: scaleX(0);
-  transform-origin: center;
-  pointer-events: none;
-  border-radius: 50%;
-}
-.workblock__delete--arming .longpress-fill {
-  transform: scaleX(1);
-  transition: transform 700ms linear;
-}
 
 /* --- Work block resize handle --- */
 /* Sits at the bottom-right of the work block. Drag down/right to grow,
@@ -2593,11 +2573,14 @@ h1 {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 700;
   line-height: 1;
-  width: 22px;
-  height: 36px;
+  /* 36×44 — close to the 44pt HIG target so the tap-to-reorder arrows
+     are actually usable with reduced fine-motor control (they were
+     22×36, the smallest interactive targets in the app). */
+  width: 36px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;

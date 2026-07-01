@@ -1,6 +1,6 @@
 # MathApp
 
-A local-first iPad math notebook for a Hebrew-speaking 7th-grader with a writing disability — built as a Progressive Web App.
+A local-first iPad math notebook for a Hebrew-speaking 8th-grader with a writing disability — built as a Progressive Web App. All UI text addresses the user in masculine Hebrew forms.
 
 It replaces [ModMath](https://www.modmath.com/) with one critical fix: **uploaded worksheets render cleanly with no grid lines crossing the text**. The grid stays where it's needed (in the work area) and disappears where it isn't (under the worksheet image).
 

@@ -429,7 +429,7 @@ export function toast(message, { duration = 2400, kind = 'info' } = {}) {
 // call site so the cooldown applies globally.
 const SAVE_TOAST_COOLDOWN_MS = 4000;
 let lastSaveErrorAt = 0;
-export function notifySaveError(message = 'השמירה נכשלה — נסי לגבות את המחברת.') {
+export function notifySaveError(message = 'השמירה נכשלה — נסה לגבות את המחברת.') {
   const now = Date.now();
   if (now - lastSaveErrorAt < SAVE_TOAST_COOLDOWN_MS) return;
   lastSaveErrorAt = now;
