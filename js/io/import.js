@@ -105,9 +105,15 @@ let pdfjsPromise = null;
 function loadPdfJs() {
   if (!pdfjsPromise) {
     pdfjsPromise = (async () => {
+      // pdf.js 5.x calls Map.prototype.getOrInsertComputed, which engines
+      // older than late-2025 (including current iPadOS Safari) don't have —
+      // without the polyfill every page render throws and the import
+      // produces nothing. Must load before pdf.min.mjs evaluates; the
+      // worker gets the same polyfill via pdf.worker.shim.mjs.
+      await import('../../vendor/map-polyfill.mjs');
       const pdfjs = await import('../../vendor/pdf.min.mjs');
       pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        '../../vendor/pdf.worker.min.mjs',
+        '../../vendor/pdf.worker.shim.mjs',
         import.meta.url
       ).href;
       return pdfjs;
@@ -193,6 +199,16 @@ async function renderPdfToBlocks(file) {
   }
   try { await pdf.cleanup(); } catch (_) {}
   try { await pdf.destroy(); } catch (_) {}
+  // Every page failed to render (per-page errors are tolerated so one bad
+  // page doesn't kill the import, but ZERO pages means the whole thing
+  // failed). Without this toast the import ends silently — the kid taps
+  // the button, nothing appears, and the app looks broken.
+  if (blocks.length === 0 && pages > 0) {
+    toast('לא הצלחנו להציג את עמודי ה-PDF — נסה לצלם את הדף במקום.', {
+      kind: 'error',
+      duration: 4800
+    });
+  }
   return blocks;
 }
 
